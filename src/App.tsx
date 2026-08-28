@@ -3,6 +3,7 @@ import { fetchLibrary, fetchRecommend, postFeedback, postListen } from "./api";
 import { PlayerBar } from "./components/PlayerBar";
 import { RecommendPanel } from "./components/RecommendPanel";
 import { Sidebar } from "./components/Sidebar";
+import { UpcomingPanel } from "./components/UpcomingPanel";
 import { TrackList } from "./components/TrackList";
 import { IconRefresh, IconSearch } from "./components/Icons";
 import { usePlayer } from "./hooks/usePlayer";
@@ -33,6 +34,8 @@ export default function App() {
   }, []);
 
   const player = usePlayer(tracks, {
+    recommendItems: recs,
+    previewSmart: filter.kind === "recommend",
     onListen: (report) => {
       void postListen(report).then(() => void refreshRecs(report.trackId));
     },
@@ -206,6 +209,17 @@ export default function App() {
           />
         )}
       </main>
+
+      <UpcomingPanel
+        items={player.upcoming}
+        mode={player.mode}
+        smartPreview={filter.kind === "recommend"}
+        hasCurrent={Boolean(player.current)}
+        onPlay={(track) => {
+          if (filter.kind === "recommend") player.setMode("smart");
+          player.playTrack(track);
+        }}
+      />
 
       <PlayerBar
         current={player.current}

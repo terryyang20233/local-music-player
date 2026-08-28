@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { streamUrl } from "../api";
-import type { ListenReport, PlayMode, Track } from "../types";
+import type { ListenReport, PlayMode, RecommendItem, Track, UpcomingItem } from "../types";
+
+const UPCOMING_COUNT = 8;
 
 const RATES = [0.5, 0.75, 1, 1.25, 1.5, 1.75, 2];
 const MODE_KEY = "changji.mode";
@@ -32,6 +34,8 @@ function shuffleIds(ids: string[], currentId?: string | null): string[] {
 type PlayerOptions = {
   onListen?: (report: ListenReport) => void;
   pickSmartNext?: (current: Track, recentIds: string[]) => Track | null;
+  recommendItems?: RecommendItem[];
+  previewSmart?: boolean;
 };
 
 export function usePlayer(tracks: Track[], options: PlayerOptions = {}) {
@@ -71,6 +75,7 @@ export function usePlayer(tracks: Track[], options: PlayerOptions = {}) {
   const [muted, setMuted] = useState(false);
   const [shuffleOrder, setShuffleOrder] = useState<string[]>([]);
   const [levels, setLevels] = useState<number[]>(() => Array(16).fill(0));
+  const [recentIds, setRecentIds] = useState<string[]>([]);
 
   const byId = useMemo(() => new Map(tracks.map((t) => [t.id, t])), [tracks]);
   const current = currentId ? byId.get(currentId) ?? null : null;
@@ -87,6 +92,41 @@ export function usePlayer(tracks: Track[], options: PlayerOptions = {}) {
     }
     return tracks;
   }, [tracks, current, mode, shuffleOrder]);
+
+  const recommendItems = options.recommendItems;
+  const previewSmart = Boolean(options.previewSmart);
+
+  const upcoming = useMemo((): UpcomingItem[] => {
+    const fromQueue = (): UpcomingItem[] => {
+      if (queue.length === 0) return [];
+      if (!current) {
+        return queue.slice(0, UPCOMING_COUNT).map((track) => ({ track }));
+      }
+      const idx = queue.findIndex((t) => t.id === current.id);
+      if (idx < 0) {
+        return queue.slice(0, UPCOMING_COUNT).map((track) => ({ track }));
+      }
+      if (mode === "repeat-one") {
+        return [{ track: current, reason: "单曲循环" }];
+      }
+      const out: UpcomingItem[] = [];
+      const count = Math.min(UPCOMING_COUNT, Math.max(0, queue.length - 1));
+      for (let i = 1; i <= count; i += 1) {
+        const track = queue[(idx + i) % queue.length];
+        if (track) out.push({ track });
+      }
+      return out;
+    };
+
+    if (mode === "smart" || previewSmart) {
+      const fromModel = (recommendItems ?? [])
+        .filter((item) => item.track && item.id !== current?.id && !recentIds.includes(item.id))
+        .slice(0, UPCOMING_COUNT)
+        .map((item) => ({ track: item.track, reason: item.reason }));
+      if (fromModel.length > 0) return fromModel;
+    }
+    return fromQueue();
+  }, [current, mode, previewSmart, queue, recentIds, recommendItems]);
 
   const attachGraph = useCallback((audio: HTMLAudioElement) => {
     if (sourceRef.current) return;
@@ -136,7 +176,9 @@ export function usePlayer(tracks: Track[], options: PlayerOptions = {}) {
     const nextSrc = streamUrl(track.id);
     const already = audio.src.includes(track.id);
     if (sessionRef.current.trackId && sessionRef.current.trackId !== track.id) {
-      recentRef.current = [...recentRef.current, sessionRef.current.trackId].slice(-12);
+      const nextRecent = [...recentRef.current, sessionRef.current.trackId].slice(-12);
+      recentRef.current = nextRecent;
+      setRecentIds(nextRecent);
       historyRef.current = [...historyRef.current, sessionRef.current.trackId].slice(-40);
       flushListen("pick");
     }
@@ -389,6 +431,7 @@ export function usePlayer(tracks: Track[], options: PlayerOptions = {}) {
     setMuted,
     levels,
     queue,
+    upcoming,
     playTrack,
     togglePlay,
     next,

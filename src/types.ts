@@ -42,6 +42,11 @@ export type RecommendItem = {
   track: Track;
 };
 
+export type UpcomingItem = {
+  track: Track;
+  reason?: string;
+};
+
 export type RecommendResponse = {
   metrics: {
     trained: boolean;
