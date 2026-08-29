@@ -9,7 +9,9 @@
     "dev:server": "node server/index.js",
     "build": "vite build",
     "start": "NODE_ENV=production node server/index.js",
-    "preview": "npm run build && npm start"
+    "preview": "npm run build && npm start",
+    "app": "bash scripts/launch.sh",
+    "install-app": "bash scripts/install-app.sh"
   },
   "dependencies": {
     "express": "^4.21.2",

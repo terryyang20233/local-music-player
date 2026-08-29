@@ -4,12 +4,22 @@
 
 ## 开始
 
+双击 **唱机.app**（桌面或 `~/Applications`）即可启动。第一次会打包界面并打开浏览器；从程序坞退出唱机时会关掉后台服务。
+
+若还没有这个图标：
+
+```bash
+npm run install-app
+```
+
+开发调试仍可用：
+
 ```bash
 npm install
 npm run dev
 ```
 
-浏览器打开 [http://localhost:5173](http://localhost:5173)。
+浏览器打开 [http://localhost:5173](http://localhost:5173)。生产模式启动是 [http://localhost:8787](http://localhost:8787)。
 
 曲库目录可改 `config.json` 里的 `musicDir`，或启动时设置环境变量：
 
