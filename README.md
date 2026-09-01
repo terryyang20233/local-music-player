@@ -1,107 +1,135 @@
 # 唱机 — Local Music Player
 
-[English](README.en.md)
+[中文](README.zh.md)
 
-本地 FLAC 播放器。默认读取 `~/Desktop/music-resources`，支持单曲循环、歌手循环、随机播放、快进快退和倍速。
+A local FLAC player with on-device recommendations. It scans a folder on your machine, plays audio in the browser, and learns what you finish or skip — without uploading listening history.
 
-## 开始
+The UI is in Chinese. Audio files and play history are **not** in this repo.
 
-双击 **唱机.app**（桌面或 `~/Applications`）即可启动。第一次会打包界面并打开浏览器；从程序坞退出唱机时会关掉后台服务。
+## Features
 
-若还没有这个图标：
+- FLAC (and other common formats) from a local folder, using Vorbis tags for title / artist / album
+- Repeat one, repeat artist, shuffle, repeat all, plus a **smart** mode that picks the next track
+- Seek, playback speed (`0.5x`–`2x`), volume, keyboard shortcuts
+- **For you**: logistic regression + Item2Vec + content neighbors, trained on this device
+- Optional macOS app wrapper so you can launch from the Dock
 
-```bash
-npm run install-app
-```
+## Requirements
 
-开发调试仍可用：
+- Node.js 18+
+- A folder of audio files (default `~/Desktop/music-resources`)
+- macOS only if you want the Dock app (`npm run install-app`); Linux/Windows can use `npm run dev` / `npm start`
+
+## Quick start
 
 ```bash
 npm install
 npm run dev
 ```
 
-浏览器打开 [http://localhost:5173](http://localhost:5173)。生产模式启动是 [http://localhost:8787](http://localhost:8787)。
+Open [http://localhost:5173](http://localhost:5173). Production (built UI + API) is [http://localhost:8787](http://localhost:8787):
 
-曲库目录可改 `config.json` 里的 `musicDir`，或启动时设置环境变量：
+```bash
+npm run preview
+```
+
+Set the library path in `config.json` (`musicDir`) or with an env var:
 
 ```bash
 MUSIC_DIR="/path/to/music" npm run dev
 ```
 
-改完目录后点界面上的「重新扫描」。
+Then click **重新扫描** (rescan) in the sidebar.
 
-## 播放
+On macOS, generate a local **唱机.app** (Desktop + `~/Applications`) with:
 
-- **单曲循环** / **歌手循环** / **随机播放** / **全部循环**：点播放条右侧的模式按钮切换
-- **快进 / 快退 10 秒**：播放键两边的箭头，或键盘 `←` / `→`（Shift 为 30 秒）
-- **倍速**：`0.5x`–`2x`，点击倍速按钮循环，悬停可选精确值
-- 进度条可拖动；音量滑杆在右下角
-- **为你推荐**：本地机器学习（逻辑回归 + Item2Vec + 内容近邻）。完播、跳过和「喜欢」都会写入 `data/listens.json` 并立刻重训
-- **智能推荐**播放模式：切到下一首时由模型挑选
+```bash
+npm run install-app
+```
 
-## 推荐算法
+The first launch builds the UI and opens a browser. Quitting from the Dock stops the background server. Do not commit `唱机.app`; it is machine-specific (it stores your clone path).
 
-全部在本机完成，不上传听歌记录。实现见 `server/recommend.js` 与 `server/ml.js`。
+## Playback
 
-### 反馈如何变成标签
+- **Repeat one** / **repeat artist** / **shuffle** / **repeat all**: cycle with the mode button on the right of the player bar
+- **Seek ±10s**: arrows beside play, or `←` / `→` (Shift for 30 seconds)
+- **Speed**: `0.5x`–`2x`; click to cycle, hover to pick an exact value
+- The progress bar is draggable; volume is at the bottom right
+- **For you**: completes, skips, and likes go to `data/listens.json` (gitignored) and the model retrains immediately
+- **Smart** play mode: the next track is chosen by the same model
 
-每次听完、跳过或点「喜欢 / 不喜欢」都会记一条事件（最多保留 2500 条）。标签规则：
+## Recommendation algorithm
 
-| 行为 | 标签 |
+Everything runs locally. See `server/recommend.js` and `server/ml.js`.
+
+### How feedback becomes labels
+
+Each complete, skip, like, or dislike is stored as an event (up to 2500 events). Labeling:
+
+| Behavior | Label |
 | --- | --- |
-| 点喜欢 | 正样本 `1` |
-| 点不喜欢 | 负样本 `0` |
-| 自然播完，或进度 ≥ 80% | 正样本 `1` |
-| 进度 ≥ 55%（未完播） | 弱正 `0.7`，训练时仍当正样本 |
-| 进度 < 22% 且听了不到 25 秒 | 负样本 `0`（跳过） |
-| 其余 | 忽略，不参与训练 |
+| Like | Positive `1` |
+| Dislike | Negative `0` |
+| Natural end, or progress ≥ 80% | Positive `1` |
+| Progress ≥ 55% (not finished) | Weak positive `0.7`; treated as positive in training |
+| Progress < 22% and under 25 seconds | Negative `0` (skip) |
+| Anything else | Ignored |
 
-「喜欢」还会给该曲额外加完播计数。若只有正样本没有负样本，会从你没听过的歌手里抽几首当负样本，避免模型塌成全 1。
+A like also adds extra complete-count to that track. If there are only positives, a few tracks from unheard artists are used as synthetic negatives so the model does not collapse to all 1s.
 
-### 每首歌的特征向量（35 维）
+### Per-track feature vector (35 dims)
 
-| 段 | 维数 | 内容 |
+| Block | Dims | Contents |
 | --- | --- | --- |
-| 歌手哈希 | 12 | 歌手名 FNV-1a 哈希到固定槽 |
-| 专辑哈希 | 8 | 专辑名同样哈希 |
-| 音频数值 | 4 | 时长、`log(1 + 时长)`、采样率、位深 |
-| 亲和 | 4 | 该歌手/专辑完播率、歌手播放占比、是否从未听过 |
-| 行为 | 4 | 播放次数、跳过率、完播率、最近一次收听的时间衰减 |
-| 情境 | 3 | 当前小时的 sin/cos、是否周末 |
+| Artist hash | 12 | Artist name hashed with FNV-1a into fixed slots |
+| Album hash | 8 | Same for album name |
+| Audio scalars | 4 | Duration, `log(1 + duration)`, sample rate, bit depth |
+| Affinity | 4 | Artist/album complete rates, artist play share, never-played flag |
+| Behavior | 4 | Play count, skip rate, complete rate, recency decay |
+| Context | 3 | sin/cos of current hour, weekend flag |
 
-### 三个打分器
+### Three scorers
 
-1. **逻辑回归**（SGD，L2 正则）：用上面的特征预测「你会喜欢这首」的概率 `pLike`。至少 3 条样本且正负都有时才训练；否则 `pLike = 0.5`。
-2. **Item2Vec**（16 维 skip-gram）：把听歌记录按 30 分钟无播放切开成 session，窗口 2、负采样 4。完播曲目的向量取平均作为用户向量，再与候选曲做余弦相似度 `seqSim`。
-3. **内容近邻**：歌手 + 专辑哈希 + 音频数值组成内容向量。若当前有正在播的种子曲，与候选做余弦相似度 `contentSim`；没有种子时该项为中性 `0.5`。
+1. **Logistic regression** (SGD, L2): predicts `pLike` from the feature vector. Trains only when there are at least 3 samples with both classes; otherwise `pLike = 0.5`.
+2. **Item2Vec** (16-d skip-gram): listening events are split into sessions at a 30-minute idle gap, window 2, 4 negative samples. Completed tracks are averaged into a user vector; cosine similarity with a candidate is `seqSim`.
+3. **Content neighbors**: artist + album hashes plus audio scalars. If there is a seed (the current track), cosine similarity with the candidate is `contentSim`; without a seed this term is a neutral `0.5`.
 
-### 最终分数与多样性
+### Final score and diversity
 
 ```
 score = 0.46 × pLike + 0.24 × seqSim + 0.22 × contentSim
-      + 0.08（从未听过）+ 0.12（已点喜欢）− 0.03 × min(播放次数, 6)
+      + 0.08 (never played) + 0.12 (liked) − 0.03 × min(play count, 6)
 ```
 
-再按 **MMR** 逐首挑选，避免列表全是同一歌手/专辑：
+Tracks are then picked one by one with **MMR** so the list is not all one artist or album:
 
 ```
-mmr = 0.72 × score − 0.28 × max(与已选曲的内容相似度)
+mmr = 0.72 × score − 0.28 × max(content similarity to already picked tracks)
 ```
 
-侧边栏「为你推荐」默认取 12 首。「智能推荐」切下一首时用同一套分数，取前 6 名里的第一首。卡片上的文案（同一歌手、连着听、口味匹配百分比等）按 `pLike`、序列相似度和内容相似度哪一项更突出来写。
+The **For you** sidebar requests 12 tracks. **Smart** next-track uses the same scores and takes the top of a 6-item list. Card copy (same artist, often played together, taste match %) follows whichever of `pLike`, sequence similarity, or content similarity stands out.
 
-冷启动：还没听够时模型不训练，列表仍可按内容相近和轻微新颖度排序，界面会提示先听几首。
+Cold start: until there is enough feedback the logistic model stays untrained. The list can still rank by content similarity and a small novelty bonus; the UI asks you to listen to a few tracks first.
 
-## 快捷键
+## Privacy
 
-| 键 | 功能 |
+- No accounts, analytics, or remote ML APIs. History stays in `data/listens.json` on disk.
+- The HTTP server binds to **127.0.0.1** by default so the library is not exposed on your LAN. Override with `HOST=0.0.0.0` only if you intend to share it on a trusted network.
+- `/api/library` and `/api/stream` can list and play local files for anyone who can reach the process. Keep the bind address loopback unless you know you need otherwise.
+
+## Keyboard shortcuts
+
+| Key | Action |
 | --- | --- |
-| Space | 播放 / 暂停 |
-| ← / → | 快退 / 快进 10 秒 |
-| Shift + ← / → | 30 秒 |
-| N / P | 下一首 / 上一首 |
-| ↑ / ↓ | 音量 |
-| M | 静音 |
+| Space | Play / pause |
+| ← / → | Seek −10s / +10s |
+| Shift + ← / → | 30 seconds |
+| N / P | Next / previous |
+| ↑ / ↓ | Volume |
+| M | Mute |
 
-Safari、Chrome、Firefox 均可直接播放 FLAC。文件名可以是哈希，播放器会读 Vorbis 标签里的曲名、歌手和专辑。
+Safari, Chrome, and Firefox can play FLAC directly. Filenames may be hashes; the player reads title, artist, and album from Vorbis tags.
+
+## License
+
+[MIT](LICENSE)

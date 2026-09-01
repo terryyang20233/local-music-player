@@ -23,6 +23,7 @@ function loadConfig() {
 const config = loadConfig();
 const musicDir = expandHome(process.env.MUSIC_DIR || config.musicDir);
 const port = Number(process.env.PORT || config.port || 8787);
+const host = process.env.HOST || "127.0.0.1";
 
 let tracks = [];
 const byId = new Map();
@@ -41,17 +42,6 @@ const recommender = new Recommender(path.join(rootDir, "data"));
 const app = express();
 app.disable("x-powered-by");
 app.use(express.json({ limit: "256kb" }));
-
-app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  if (req.method === "OPTIONS") {
-    res.status(204).end();
-    return;
-  }
-  next();
-});
 
 app.get("/api/health", (_req, res) => {
   res.json({
@@ -132,7 +122,7 @@ app.get("/api/stream/:id", (req, res) => {
 
   res.setHeader("Content-Type", mime);
   res.setHeader("Accept-Ranges", "bytes");
-  res.setHeader("Cache-Control", "public, max-age=3600");
+  res.setHeader("Cache-Control", "private, max-age=3600");
 
   const range = req.headers.range;
   if (!range) {
@@ -172,11 +162,13 @@ if (fs.existsSync(distDir)) {
   });
 }
 
-app.listen(port, () => {
+app.listen(port, host, () => {
+  const origin = `http://${host === "127.0.0.1" ? "localhost" : host}:${port}`;
   console.log(`[唱机] library: ${musicDir}`);
   console.log(`[唱机] tracks:  ${tracks.length}`);
-  console.log(`[唱机] api:     http://localhost:${port}/api/library`);
+  console.log(`[唱机] bind:    ${host}:${port}`);
+  console.log(`[唱机] api:     ${origin}/api/library`);
   if (fs.existsSync(distDir)) {
-    console.log(`[唱机] app:     http://localhost:${port}`);
+    console.log(`[唱机] app:     ${origin}`);
   }
 });

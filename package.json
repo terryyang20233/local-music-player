@@ -2,6 +2,8 @@
   "name": "local-music-player",
   "private": true,
   "version": "1.0.0",
+  "license": "MIT",
+  "description": "Local FLAC player with on-device recommendations",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k -n web,api -c cyan,magenta \"vite\" \"node server/index.js\"",
