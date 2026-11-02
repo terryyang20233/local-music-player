@@ -189,3 +189,49 @@ export function IconHeartFill(props: IconProps) {
     </Svg>
   );
 }
+
+export function IconThumbDown(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M17 4h3v10h-3z" />
+      <path d="M17 13l-4 7a2 2 0 0 1-2.8-2.2L11 14H6a2 2 0 0 1-2-2.3l1.2-6A2 2 0 0 1 7.2 4H17" />
+    </Svg>
+  );
+}
+
+export function IconList(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M8 6h12M8 12h12M8 18h8" />
+      <circle cx="4" cy="6" r="0.6" fill="currentColor" />
+      <circle cx="4" cy="12" r="0.6" fill="currentColor" />
+      <circle cx="4" cy="18" r="0.6" fill="currentColor" />
+    </Svg>
+  );
+}
+
+export function IconChart(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 20h16" />
+      <path d="M7 16v-5M12 16V6M17 16v-8" />
+    </Svg>
+  );
+}
+
+export function IconPlus(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M12 5v14M5 12h14" />
+    </Svg>
+  );
+}
+
+export function IconGain(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M4 15h3l4 4V5L7 9H4z" />
+      <path d="M15 9h5M15 15h5M17.5 6.5v5" />
+    </Svg>
+  );
+}

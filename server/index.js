@@ -2,8 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
-import { expandHome, publicTrack, scanLibrary } from "./library.js";
+import { expandHome, legacyId, publicTrack, readEmbeddedCover, scanLibrary } from "./library.js";
+import { loadLyrics } from "./lyrics.js";
+import { Playlists } from "./playlists.js";
 import { Recommender } from "./recommend.js";
+import { listeningStats } from "./stats.js";
+import { readJson, writeJsonAtomic } from "./store.js";
+import { streamTrack } from "./stream.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -24,24 +29,127 @@ const config = loadConfig();
 const musicDir = expandHome(process.env.MUSIC_DIR || config.musicDir);
 const port = Number(process.env.PORT || config.port || 8787);
 const host = process.env.HOST || "127.0.0.1";
+const dataDir = process.env.DATA_DIR ? expandHome(process.env.DATA_DIR) : path.join(rootDir, "data");
 
-let tracks = [];
-const byId = new Map();
+const recommender = new Recommender(dataDir);
+const playlists = new Playlists(dataDir);
 
-function refreshLibrary() {
-  tracks = scanLibrary(musicDir);
-  byId.clear();
-  for (const track of tracks) byId.set(track.id, track);
-  return tracks;
+// ---- 曲库 ----
+
+const CACHE_VERSION = 2;
+const cacheFile = path.join(dataDir, "library-cache.json");
+
+function loadScanCache() {
+  const raw = readJson(cacheFile, null);
+  if (!raw || raw.version !== CACHE_VERSION || !Array.isArray(raw.entries)) return new Map();
+  return new Map(raw.entries);
 }
 
-refreshLibrary();
+let scanCache = loadScanCache();
+let tracks = [];
+const byId = new Map();
+let librarySignature = "";
+let libraryVersion = 0;
+let scanPromise = null;
+let rescanQueued = false;
 
-const recommender = new Recommender(path.join(rootDir, "data"));
+function applyTracks(next) {
+  const signature = next
+    .map((t) => `${t.id}:${t.relPath}:${t.mtime}:${t.hasCover ? 1 : 0}${t.hasLyrics ? 1 : 0}`)
+    .join("|");
+  if (signature === librarySignature) return; // 没变化就保留原数组，推荐模型不必重训
+  librarySignature = signature;
+  libraryVersion += 1;
+  tracks = next;
+  byId.clear();
+  for (const track of tracks) byId.set(track.id, track);
+
+  // 旧版本用绝对路径哈希当 ID，这里把听歌记录和歌单迁移到新 ID
+  const idMap = new Map(tracks.map((t) => [legacyId(t.path), t.id]));
+  const migrated = recommender.migrateIds(idMap) + playlists.migrateIds(idMap);
+  if (migrated) console.log(`[唱机] 已把 ${migrated} 条记录迁移到新的歌曲 ID`);
+}
+
+/** 重新扫描曲库；扫描进行中再次调用会在本轮结束后补扫一次。 */
+function refreshLibrary() {
+  if (scanPromise) {
+    rescanQueued = true;
+    return scanPromise;
+  }
+  scanPromise = (async () => {
+    try {
+      do {
+        rescanQueued = false;
+        const result = await scanLibrary(musicDir, scanCache);
+        scanCache = result.cache;
+        try {
+          writeJsonAtomic(cacheFile, { version: CACHE_VERSION, entries: [...scanCache] });
+        } catch (err) {
+          console.warn(`[唱机] 无法写入曲库缓存（${err.message}）`);
+        }
+        applyTracks(result.tracks);
+      } while (rescanQueued);
+      return tracks;
+    } finally {
+      scanPromise = null;
+    }
+  })();
+  return scanPromise;
+}
+
+let watchTimer = null;
+
+function watchLibrary() {
+  if (!fs.existsSync(musicDir)) return;
+  try {
+    const watcher = fs.watch(musicDir, { recursive: true, persistent: false }, (_type, name) => {
+      if (name && path.basename(String(name)).startsWith(".")) return;
+      clearTimeout(watchTimer);
+      watchTimer = setTimeout(() => {
+        refreshLibrary().catch((err) => console.warn(`[唱机] 自动扫描失败（${err.message}）`));
+      }, 1500);
+    });
+    watcher.on("error", (err) => console.warn(`[唱机] 曲库监听出错（${err.message}）`));
+  } catch (err) {
+    console.warn(`[唱机] 无法监听曲库目录变化，请手动重新扫描（${err.message}）`);
+  }
+}
+
+// 先开始监听端口再扫描：曲库很大时启动器的健康检查也不会超时
+const initialScan = refreshLibrary().catch((err) => {
+  console.error(`[唱机] 曲库扫描失败（${err.message}）`);
+});
+watchLibrary();
+
+// ---- HTTP ----
 
 const app = express();
 app.disable("x-powered-by");
+
+// 只绑定回环地址时，拒绝 Host 不是本机的请求，防止 DNS rebinding 网页读取本地曲库
+const LOOPBACK_BIND = ["127.0.0.1", "localhost", "::1"].includes(host);
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+app.use((req, res, next) => {
+  if (!LOOPBACK_BIND) return next();
+  const hostname = String(req.headers.host || "")
+    .replace(/:\d+$/, "")
+    .toLowerCase();
+  if (LOOPBACK_HOSTS.has(hostname) || hostname.endsWith(".localhost")) return next();
+  res.status(403).json({ error: "Forbidden host" });
+});
+
 app.use(express.json({ limit: "256kb" }));
+
+const asyncRoute = (fn) => (req, res, next) => Promise.resolve(fn(req, res)).catch(next);
+
+function libraryPayload() {
+  return {
+    musicDir,
+    version: libraryVersion,
+    trackCount: tracks.length,
+    tracks: tracks.map(publicTrack),
+  };
+}
 
 app.get("/api/health", (_req, res) => {
   res.json({
@@ -49,106 +157,186 @@ app.get("/api/health", (_req, res) => {
     musicDir,
     exists: fs.existsSync(musicDir),
     trackCount: tracks.length,
+    version: libraryVersion,
+    scanning: Boolean(scanPromise),
   });
 });
 
-app.get("/api/library", (req, res) => {
-  if (req.query.refresh === "1") refreshLibrary();
-  res.json({
-    musicDir,
-    tracks: tracks.map(publicTrack),
-  });
-});
+app.get(
+  "/api/library",
+  asyncRoute(async (req, res) => {
+    await initialScan;
+    // ?refresh=1 只为兼容旧版界面；新界面用 POST /api/rescan
+    if (req.query.refresh === "1") await refreshLibrary();
+    res.json(libraryPayload());
+  }),
+);
 
-app.post("/api/rescan", (_req, res) => {
-  refreshLibrary();
-  res.json({
-    musicDir,
-    trackCount: tracks.length,
-    tracks: tracks.map(publicTrack),
-  });
-});
+app.post(
+  "/api/rescan",
+  asyncRoute(async (_req, res) => {
+    await refreshLibrary();
+    res.json(libraryPayload());
+  }),
+);
 
 app.post("/api/events", (req, res) => {
-  const body = req.body || {};
-  recommender.record(body);
-  const metrics = recommender.train(tracks);
-  res.json({ ok: true, metrics });
+  recommender.record(req.body || {});
+  res.json({ ok: true });
 });
 
 app.post("/api/feedback", (req, res) => {
-  const { trackId, liked } = req.body || {};
-  recommender.setLike(trackId, Boolean(liked));
-  const metrics = recommender.train(tracks);
-  res.json({ ok: true, liked: Boolean(liked), metrics });
+  const { trackId, liked, disliked } = req.body || {};
+  if (typeof trackId !== "string") {
+    res.status(400).json({ error: "trackId required" });
+    return;
+  }
+  if (disliked) recommender.setDislike(trackId);
+  else recommender.setLike(trackId, Boolean(liked));
+  res.json({ ok: true, liked: Boolean(recommender.likes[trackId]), disliked: Boolean(recommender.dislikes[trackId]) });
 });
 
-app.get("/api/recommend", (req, res) => {
-  const seedId = typeof req.query.seed === "string" ? req.query.seed : null;
-  const limit = Math.min(24, Math.max(1, Number(req.query.limit) || 12));
-  const exclude = typeof req.query.exclude === "string"
-    ? req.query.exclude.split(",").filter(Boolean)
-    : [];
-  const result = recommender.recommend(tracks, { seedId, exclude, limit });
-  const byTrack = new Map(tracks.map((t) => [t.id, publicTrack(t)]));
-  res.json({
-    ...result,
-    items: result.items.map((item) => ({
-      ...item,
-      track: byTrack.get(item.id) || null,
-    })),
-    likes: Object.keys(recommender.likes),
-  });
+app.get("/api/stats", (_req, res) => {
+  res.json(listeningStats(recommender.events, tracks));
 });
+
+// ---- 封面 / 歌词 ----
+
+const coverCache = new Map();
+const COVER_CACHE_SIZE = 64;
+
+async function loadCover(track) {
+  if (track.picture?.offset != null) {
+    const fh = await fs.promises.open(track.path, "r");
+    try {
+      const data = Buffer.alloc(track.picture.length);
+      await fh.read(data, 0, track.picture.length, track.picture.offset);
+      return { mime: track.picture.mime, data };
+    } finally {
+      await fh.close();
+    }
+  }
+  if (track.picture?.embedded) {
+    const embedded = await readEmbeddedCover(track.path);
+    if (embedded) return embedded;
+  }
+  if (track.folderCover) {
+    const ext = path.extname(track.folderCover).toLowerCase();
+    const mime = ext === ".png" ? "image/png" : ext === ".webp" ? "image/webp" : "image/jpeg";
+    return { mime, data: await fs.promises.readFile(track.folderCover) };
+  }
+  return null;
+}
+
+app.get(
+  "/api/cover/:id",
+  asyncRoute(async (req, res) => {
+    const track = byId.get(req.params.id);
+    if (!track?.hasCover) {
+      res.status(404).end();
+      return;
+    }
+    const key = `${track.id}:${track.mtime}`;
+    let cover = coverCache.get(key);
+    if (!cover) {
+      cover = await loadCover(track).catch(() => null);
+      if (!cover) {
+        res.status(404).end();
+        return;
+      }
+      coverCache.set(key, cover);
+      if (coverCache.size > COVER_CACHE_SIZE) coverCache.delete(coverCache.keys().next().value);
+    }
+    res.setHeader("Content-Type", cover.mime);
+    res.setHeader("Cache-Control", "private, max-age=86400");
+    res.end(cover.data);
+  }),
+);
+
+app.get(
+  "/api/lyrics/:id",
+  asyncRoute(async (req, res) => {
+    const track = byId.get(req.params.id);
+    const lyrics = track?.hasLyrics ? await loadLyrics(track) : null;
+    if (!lyrics) {
+      res.status(404).json({ error: "No lyrics" });
+      return;
+    }
+    res.json(lyrics);
+  }),
+);
+
+// ---- 歌单 ----
+
+app.get("/api/playlists", (_req, res) => {
+  res.json({ playlists: playlists.list() });
+});
+
+app.post("/api/playlists", (req, res) => {
+  const playlist = playlists.create(req.body?.name);
+  if (!playlist) {
+    res.status(400).json({ error: "name required" });
+    return;
+  }
+  if (typeof req.body?.trackId === "string") playlists.addTrack(playlist.id, req.body.trackId);
+  res.json({ playlist });
+});
+
+app.patch("/api/playlists/:id", (req, res) => {
+  const playlist = playlists.update(req.params.id, req.body || {});
+  if (!playlist) {
+    res.status(404).json({ error: "Playlist not found" });
+    return;
+  }
+  res.json({ playlist });
+});
+
+app.delete("/api/playlists/:id", (req, res) => {
+  res.json({ ok: playlists.remove(req.params.id) });
+});
+
+app.post("/api/playlists/:id/tracks", (req, res) => {
+  const playlist = playlists.addTrack(req.params.id, req.body?.trackId);
+  if (!playlist) {
+    res.status(404).json({ error: "Playlist not found" });
+    return;
+  }
+  res.json({ playlist });
+});
+
+app.delete("/api/playlists/:id/tracks/:trackId", (req, res) => {
+  const playlist = playlists.removeTrack(req.params.id, req.params.trackId);
+  if (!playlist) {
+    res.status(404).json({ error: "Playlist not found" });
+    return;
+  }
+  res.json({ playlist });
+});
+
+app.get(
+  "/api/recommend",
+  asyncRoute(async (req, res) => {
+    await initialScan;
+    const seedId = typeof req.query.seed === "string" ? req.query.seed : null;
+    const limit = Math.min(24, Math.max(1, Number(req.query.limit) || 12));
+    const exclude = typeof req.query.exclude === "string"
+      ? req.query.exclude.split(",").filter(Boolean)
+      : [];
+    const result = recommender.recommend(tracks, { seedId, exclude, limit });
+    res.json({
+      ...result,
+      items: result.items.map((item) => ({
+        ...item,
+        track: byId.has(item.id) ? publicTrack(byId.get(item.id)) : null,
+      })),
+      likes: Object.keys(recommender.likes),
+      dislikes: Object.keys(recommender.dislikes),
+    });
+  }),
+);
 
 app.get("/api/stream/:id", (req, res) => {
-  const track = byId.get(req.params.id);
-  if (!track || !fs.existsSync(track.path)) {
-    res.status(404).json({ error: "Track not found" });
-    return;
-  }
-
-  const stat = fs.statSync(track.path);
-  const mime =
-    track.ext === "flac"
-      ? "audio/flac"
-      : track.ext === "mp3"
-        ? "audio/mpeg"
-        : track.ext === "wav"
-          ? "audio/wav"
-          : track.ext === "m4a"
-            ? "audio/mp4"
-            : "application/octet-stream";
-
-  res.setHeader("Content-Type", mime);
-  res.setHeader("Accept-Ranges", "bytes");
-  res.setHeader("Cache-Control", "private, max-age=3600");
-
-  const range = req.headers.range;
-  if (!range) {
-    res.setHeader("Content-Length", stat.size);
-    fs.createReadStream(track.path).pipe(res);
-    return;
-  }
-
-  const match = /bytes=(\d*)-(\d*)/.exec(range);
-  if (!match) {
-    res.status(416).end();
-    return;
-  }
-
-  const start = match[1] ? Number(match[1]) : 0;
-  const end = match[2] ? Number(match[2]) : stat.size - 1;
-  if (Number.isNaN(start) || Number.isNaN(end) || start > end || start >= stat.size) {
-    res.status(416).setHeader("Content-Range", `bytes */${stat.size}`).end();
-    return;
-  }
-
-  const safeEnd = Math.min(end, stat.size - 1);
-  res.status(206);
-  res.setHeader("Content-Range", `bytes ${start}-${safeEnd}/${stat.size}`);
-  res.setHeader("Content-Length", safeEnd - start + 1);
-  fs.createReadStream(track.path, { start, end: safeEnd }).pipe(res);
+  streamTrack(req, res, byId.get(req.params.id));
 });
 
 if (fs.existsSync(distDir)) {
@@ -162,11 +350,16 @@ if (fs.existsSync(distDir)) {
   });
 }
 
+app.use((err, _req, res, _next) => {
+  console.error("[唱机]", err);
+  if (!res.headersSent) res.status(500).json({ error: "Internal error" });
+});
+
 app.listen(port, host, () => {
   const origin = `http://${host === "127.0.0.1" ? "localhost" : host}:${port}`;
   console.log(`[唱机] library: ${musicDir}`);
-  console.log(`[唱机] tracks:  ${tracks.length}`);
   console.log(`[唱机] bind:    ${host}:${port}`);
+  void initialScan.then(() => console.log(`[唱机] tracks:  ${tracks.length}`));
   console.log(`[唱机] api:     ${origin}/api/library`);
   if (fs.existsSync(distDir)) {
     console.log(`[唱机] app:     ${origin}`);

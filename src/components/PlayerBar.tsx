@@ -1,9 +1,11 @@
-import { formatTime } from "../api";
+import { coverUrl, formatTime } from "../api";
 import { CoverArt } from "./CoverArt";
+import { Visualizer } from "./Visualizer";
 import {
   IconArtistLoop,
   IconBack,
   IconFwd,
+  IconGain,
   IconHeart,
   IconHeartFill,
   IconMute,
@@ -15,15 +17,18 @@ import {
   IconRepeatOne,
   IconShuffle,
   IconSpark,
+  IconThumbDown,
   IconVolume,
 } from "./Icons";
+import { usePlaybackTime } from "../hooks/usePlayer";
 import type { PlayMode, Track } from "../types";
 import { useRef } from "react";
 
 type Props = {
   current: Track | null;
   playing: boolean;
-  currentTime: number;
+  subscribeTime: (listener: () => void) => () => void;
+  getTime: () => number;
   duration: number;
   mode: PlayMode;
   setMode: (mode: PlayMode) => void;
@@ -35,7 +40,7 @@ type Props = {
   setVolume: (v: number) => void;
   muted: boolean;
   setMuted: (v: boolean | ((m: boolean) => boolean)) => void;
-  levels: number[];
+  getAnalyser: () => AnalyserNode | null;
   onToggle: () => void;
   onNext: () => void;
   onPrev: () => void;
@@ -43,6 +48,9 @@ type Props = {
   onSeekBy: (d: number) => void;
   liked?: boolean;
   onToggleLike?: () => void;
+  onDislike?: () => void;
+  replayGain: boolean;
+  onToggleReplayGain: () => void;
 };
 
 const MODES: { id: PlayMode; label: string; hint: string }[] = [
@@ -64,7 +72,8 @@ function ModeIcon({ mode }: { mode: PlayMode }) {
 export function PlayerBar({
   current,
   playing,
-  currentTime,
+  subscribeTime,
+  getTime,
   duration,
   mode,
   setMode,
@@ -76,7 +85,7 @@ export function PlayerBar({
   setVolume,
   muted,
   setMuted,
-  levels,
+  getAnalyser,
   onToggle,
   onNext,
   onPrev,
@@ -84,18 +93,10 @@ export function PlayerBar({
   onSeekBy,
   liked = false,
   onToggleLike,
+  onDislike,
+  replayGain,
+  onToggleReplayGain,
 }: Props) {
-  const barRef = useRef<HTMLDivElement>(null);
-  const pct = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
-
-  const seekFromEvent = (clientX: number) => {
-    const el = barRef.current;
-    if (!el || duration <= 0) return;
-    const rect = el.getBoundingClientRect();
-    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
-    onSeek(ratio * duration);
-  };
-
   const cycleMode = () => {
     const i = MODES.findIndex((m) => m.id === mode);
     setMode(MODES[(i + 1) % MODES.length].id);
@@ -112,6 +113,7 @@ export function PlayerBar({
             label={current.album}
             spinning={playing}
             size="md"
+            src={current.hasCover ? coverUrl(current.id) : null}
           />
         ) : (
           <div className="cover cover-md cover-empty" />
@@ -120,68 +122,64 @@ export function PlayerBar({
           <strong>{current?.title || "尚未播放"}</strong>
           <span>{current ? `${current.artist} · ${current.album}` : "从曲库里选一首开始"}</span>
         </div>
-        <div className="viz" aria-hidden>
-          {levels.map((n, i) => (
-            <span key={i} style={{ height: `${Math.max(8, n * 100)}%` }} />
-          ))}
-        </div>
+        <Visualizer getAnalyser={getAnalyser} playing={playing} />
       </div>
 
       <div className="player-main">
         <div className="transport">
-          <button className="icon-btn" title="快退 10 秒  ←" onClick={() => onSeekBy(-10)} type="button">
+          <button className="icon-btn" title="快退 10 秒  ←" aria-label="快退 10 秒" onClick={() => onSeekBy(-10)} type="button">
             <IconBack size={18} />
             <em>10</em>
           </button>
-          <button className="icon-btn" title="上一首  P" onClick={onPrev} type="button">
+          <button className="icon-btn" title="上一首  P" aria-label="上一首" onClick={onPrev} type="button">
             <IconPrev size={18} />
           </button>
-          <button className="play-btn" title={playing ? "暂停  Space" : "播放  Space"} onClick={onToggle} type="button">
+          <button className="play-btn" title={playing ? "暂停  Space" : "播放  Space"} aria-label={playing ? "暂停" : "播放"} onClick={onToggle} type="button">
             {playing ? <IconPause size={22} /> : <IconPlay size={22} />}
           </button>
-          <button className="icon-btn" title="下一首  N" onClick={onNext} type="button">
+          <button className="icon-btn" title="下一首  N" aria-label="下一首" onClick={onNext} type="button">
             <IconNext size={18} />
           </button>
-          <button className="icon-btn" title="快进 10 秒  →" onClick={() => onSeekBy(10)} type="button">
+          <button className="icon-btn" title="快进 10 秒  →" aria-label="快进 10 秒" onClick={() => onSeekBy(10)} type="button">
             <IconFwd size={18} />
             <em>10</em>
           </button>
         </div>
 
-        <div className="seek-row">
-          <span>{formatTime(currentTime)}</span>
-          <div
-            className="seek"
-            ref={barRef}
-            onPointerDown={(e) => {
-              (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-              seekFromEvent(e.clientX);
-            }}
-            onPointerMove={(e) => {
-              if (e.buttons !== 1) return;
-              seekFromEvent(e.clientX);
-            }}
-            role="slider"
-            aria-valuemin={0}
-            aria-valuemax={duration}
-            aria-valuenow={currentTime}
-            tabIndex={0}
-          >
-            <div className="seek-fill" style={{ width: `${pct}%` }} />
-          </div>
-          <span>{formatTime(duration)}</span>
-        </div>
+        <SeekRow subscribeTime={subscribeTime} getTime={getTime} duration={duration} onSeek={onSeek} />
       </div>
 
       <div className="player-extra">
         <button
           className={`icon-btn like-btn ${liked ? "is-liked" : ""}`}
           title={liked ? "取消喜欢" : "喜欢，作为正样本"}
+          aria-label={liked ? "取消喜欢" : "喜欢"}
+          aria-pressed={liked}
           onClick={onToggleLike}
           type="button"
           disabled={!current}
         >
           {liked ? <IconHeartFill size={18} /> : <IconHeart size={18} />}
+        </button>
+        <button
+          className="icon-btn"
+          title="不喜欢：跳过并少推荐这类"
+          aria-label="不喜欢"
+          onClick={onDislike}
+          type="button"
+          disabled={!current}
+        >
+          <IconThumbDown size={18} />
+        </button>
+        <button
+          className={`icon-btn ${replayGain ? "is-on" : ""}`}
+          title={replayGain ? "音量均衡已开启（ReplayGain）" : "音量均衡已关闭（ReplayGain）"}
+          aria-label="音量均衡"
+          aria-pressed={replayGain}
+          onClick={onToggleReplayGain}
+          type="button"
+        >
+          <IconGain size={18} />
         </button>
         <button
           className={`mode-btn is-on`}
@@ -194,7 +192,7 @@ export function PlayerBar({
         </button>
 
         <div className="rate-wrap">
-          <button className="rate-btn" title="切换倍速" onClick={cycleRate} type="button">
+          <button className="rate-btn" title="切换倍速" aria-label={`倍速 ${rate}x`} onClick={cycleRate} type="button">
             {rate.toFixed(2).replace(/\.00$/, ".0")}x
           </button>
           <div className="rate-menu">
@@ -215,6 +213,7 @@ export function PlayerBar({
           <button
             className="icon-btn"
             title={muted ? "取消静音  M" : "静音  M"}
+            aria-label={muted ? "取消静音" : "静音"}
             onClick={() => setMuted((m) => !m)}
             type="button"
           >
@@ -223,6 +222,7 @@ export function PlayerBar({
           <input
             className="vol"
             type="range"
+            aria-label="音量"
             min={0}
             max={1}
             step={0.01}
@@ -232,5 +232,64 @@ export function PlayerBar({
         </div>
       </div>
     </footer>
+  );
+}
+
+type SeekRowProps = {
+  subscribeTime: (listener: () => void) => () => void;
+  getTime: () => number;
+  duration: number;
+  onSeek: (t: number) => void;
+};
+
+/** 进度条单独订阅播放进度，其他部分不会因为时间走动而重渲染。 */
+function SeekRow({ subscribeTime, getTime, duration, onSeek }: SeekRowProps) {
+  const currentTime = usePlaybackTime(subscribeTime, getTime);
+  const barRef = useRef<HTMLDivElement>(null);
+  const pct = duration > 0 ? Math.min(100, (currentTime / duration) * 100) : 0;
+
+  const seekFromEvent = (clientX: number) => {
+    const el = barRef.current;
+    if (!el || duration <= 0) return;
+    const rect = el.getBoundingClientRect();
+    const ratio = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
+    onSeek(ratio * duration);
+  };
+
+  return (
+    <div className="seek-row">
+      <span>{formatTime(currentTime)}</span>
+      <div
+        className="seek"
+        ref={barRef}
+        onPointerDown={(e) => {
+          (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+          seekFromEvent(e.clientX);
+        }}
+        onPointerMove={(e) => {
+          if (e.buttons !== 1) return;
+          seekFromEvent(e.clientX);
+        }}
+        onKeyDown={(e) => {
+          // 方向键 ±5 秒，PageUp / PageDown ±30 秒，Home / End 跳到开头结尾
+          const step = { ArrowLeft: -5, ArrowRight: 5, ArrowDown: -5, ArrowUp: 5, PageDown: -30, PageUp: 30 }[e.key];
+          if (step != null) onSeek(Math.min(duration, Math.max(0, currentTime + step)));
+          else if (e.key === "Home") onSeek(0);
+          else if (e.key === "End") onSeek(Math.max(0, duration - 1));
+          else return;
+          e.preventDefault();
+        }}
+        role="slider"
+        aria-label="播放进度"
+        aria-valuemin={0}
+        aria-valuemax={Math.round(duration)}
+        aria-valuenow={Math.round(currentTime)}
+        aria-valuetext={`${formatTime(currentTime)} / ${formatTime(duration)}`}
+        tabIndex={0}
+      >
+        <div className="seek-fill" style={{ width: `${pct}%` }} />
+      </div>
+      <span>{formatTime(duration)}</span>
+    </div>
   );
 }

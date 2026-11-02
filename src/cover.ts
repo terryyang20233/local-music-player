@@ -30,7 +30,7 @@ export function initials(text: string): string {
   const cleaned = text.replace(/\s+/g, " ").trim();
   if (!cleaned) return "♪";
   const parts = cleaned.split(" ");
-  if (parts.length >= 2 && /^[\x00-\x7F]+$/.test(cleaned)) {
+  if (parts.length >= 2 && /^[ -~]+$/.test(cleaned)) {
     return (parts[0][0] + parts[1][0]).toUpperCase();
   }
   return cleaned.slice(0, 2);

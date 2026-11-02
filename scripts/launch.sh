@@ -91,7 +91,11 @@ if [[ -z "$NODE" || -z "$NPM" || ! -x "$NODE" ]]; then
 fi
 export PATH="$(dirname "$NODE"):$PATH"
 
-PORT=8787
+# 端口：环境变量 PORT > config.json 的 port > 8787，和服务端读取顺序一致
+if [[ -z "${PORT:-}" ]]; then
+  PORT="$("$NODE" -e 'try { const c = require(process.argv[1]); console.log(Number(c.port) || 8787) } catch { console.log(8787) }' "$ROOT/config.json" 2>/dev/null || echo 8787)"
+fi
+export PORT
 URL="http://localhost:${PORT}"
 PID_FILE="${HOME}/Library/Application Support/changji/server.pid"
 CURL="/usr/bin/curl"

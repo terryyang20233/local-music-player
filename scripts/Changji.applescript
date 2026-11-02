@@ -26,8 +26,9 @@ on run
 end run
 
 on reopen
+	-- 走一遍启动脚本：服务在跑就直接打开页面，没在跑就先拉起来（端口由 config.json 决定）
 	try
-		do shell script "/usr/bin/open http://localhost:8787"
+		my launchPlayer()
 	end try
 end reopen
 

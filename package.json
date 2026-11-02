@@ -5,6 +5,9 @@
   "license": "MIT",
   "description": "Local FLAC player with on-device recommendations",
   "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
   "scripts": {
     "dev": "concurrently -k -n web,api -c cyan,magenta \"vite\" \"node server/index.js\"",
     "dev:web": "vite",
@@ -13,19 +16,34 @@
     "start": "NODE_ENV=production node server/index.js",
     "preview": "npm run build && npm start",
     "app": "bash scripts/launch.sh",
-    "install-app": "bash scripts/install-app.sh"
+    "install-app": "bash scripts/install-app.sh",
+    "eval": "node server/eval.js",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p . && tsc --noEmit -p tsconfig.server.json",
+    "check": "npm run lint && npm run typecheck && npm test"
   },
   "dependencies": {
-    "express": "^4.21.2",
+    "express": "^4.22.3",
+    "music-metadata": "11.16.1",
+    "pinyin-pro": "3.29.5",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
+    "@eslint/js": "9.39.5",
+    "@types/express": "4.17.25",
+    "@types/node": "24.19.2",
     "@types/react": "^19.1.12",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^4.7.0",
     "concurrently": "^9.2.1",
+    "eslint": "9.39.5",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.13.0",
     "typescript": "^5.9.2",
-    "vite": "^7.1.5"
+    "typescript-eslint": "8.71.2",
+    "vite": "^7.1.5",
+    "vitest": "4.1.12"
   }
 }

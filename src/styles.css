@@ -50,7 +50,6 @@ button {
   display: grid;
   grid-template-columns: 268px 1fr 300px;
   grid-template-rows: 64px 1fr 108px;
-  min-width: 1100px;
 }
 
 .topbar {
@@ -145,17 +144,18 @@ button {
   padding: 16px 12px 12px;
   border-right: 1px solid var(--line);
   background: rgba(0, 0, 0, 0.18);
-  overflow: hidden;
+  overflow: auto;
 }
 
 .side-block {
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   min-height: 0;
 }
 
 .albums-block {
-  flex: 1;
+  flex: 1 0 200px;
 }
 
 .side-label {
@@ -299,6 +299,9 @@ button {
   border-radius: 12px;
   background: transparent;
   text-align: left;
+  /* 屏幕外的行跳过布局和绘制，曲库很大时滚动依然流畅 */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 50px;
 }
 
 .track-row:hover,
@@ -414,6 +417,7 @@ button {
 
 .viz span {
   width: 3px;
+  height: 8%;
   border-radius: 1px;
   background: var(--accent);
   opacity: 0.8;
@@ -552,7 +556,8 @@ button {
   box-shadow: var(--shadow);
 }
 
-.rate-wrap:hover .rate-menu {
+.rate-wrap:hover .rate-menu,
+.rate-wrap:focus-within .rate-menu {
   display: flex;
   flex-direction: column;
   min-width: 84px;
@@ -598,6 +603,14 @@ button {
 
 .cover-empty {
   background: var(--bg-3);
+}
+
+.cover-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .cover-ring,
@@ -823,4 +836,630 @@ button {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   font-size: 11px;
+}
+
+/* ---- 侧边栏：歌单、计数 ---- */
+
+.side-label-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.side-add {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin-right: 6px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--muted);
+}
+
+.side-add:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.side-form input,
+.menu-form input,
+.rename-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid rgba(215, 165, 110, 0.4);
+  border-radius: 10px;
+  background: var(--bg-2);
+  outline: none;
+}
+
+.side-form {
+  padding: 0 4px 6px;
+}
+
+.side-hint {
+  margin: 0 10px 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.side-count {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.playlist-scroll {
+  max-height: 20vh;
+}
+
+/* ---- 页头操作 ---- */
+
+.page-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.ghost-btn.is-danger {
+  border-color: rgba(224, 155, 141, 0.5);
+  color: #e09b8d;
+}
+
+.rename-input {
+  height: 44px;
+  margin: 2px 0;
+  font-family: var(--font-serif);
+  font-size: 28px;
+}
+
+.icon-btn.is-on {
+  color: var(--accent);
+}
+
+.icon-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---- 右侧：即将播放 / 歌词 ---- */
+
+.tabs {
+  display: flex;
+  gap: 18px;
+}
+
+.tabs button {
+  padding: 0 0 4px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-serif);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.tabs button.is-active {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+.upcoming-head .sub {
+  margin: 8px 0 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.upcoming-row.is-queued .upcoming-idx {
+  color: var(--accent);
+}
+
+.lyrics {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  padding: 12px 20px 40vh;
+  overflow: auto;
+  list-style: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.lyrics li {
+  padding: 3px 0;
+}
+
+.lyrics button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.lyrics button:hover {
+  color: var(--text);
+}
+
+.lyrics.is-synced li.is-active {
+  color: var(--accent-2);
+  font-size: 16px;
+}
+
+/* ---- 右键菜单 ---- */
+
+.track-menu {
+  position: fixed;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: 220px;
+  max-height: calc(100vh - 16px);
+  padding: 6px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-3);
+  box-shadow: var(--shadow);
+}
+
+.track-menu button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 13px;
+  text-align: left;
+}
+
+.track-menu button:hover:not(:disabled),
+.track-menu button:focus-visible {
+  background: rgba(255, 255, 255, 0.07);
+  outline: none;
+}
+
+.track-menu button:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.track-menu small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.track-menu hr {
+  width: 100%;
+  margin: 4px 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.menu-title,
+.menu-label {
+  margin: 4px 10px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-title {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.menu-form {
+  padding: 4px;
+}
+
+/* ---- 提示条 ---- */
+
+.toast-region {
+  position: fixed;
+  left: 50%;
+  bottom: 124px;
+  z-index: 60;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.toast {
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 10px 16px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-3);
+  box-shadow: var(--shadow);
+  font-size: 13px;
+}
+
+/* ---- 听歌统计 ---- */
+
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.stat-tile,
+.stat-card {
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.stat-tile span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stat-tile strong {
+  display: block;
+  margin-top: 6px;
+  white-space: nowrap;
+  font-size: 22px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-tile small {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 400;
+}
+
+.stat-card header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.stat-card h3 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.stat-card .sub {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.stat-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.day-chart {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 8px;
+  height: 140px;
+}
+
+.day-axis {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.day-plot {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  border-bottom: 1px solid var(--line);
+}
+
+.day-col {
+  position: relative;
+  display: flex;
+  flex: 1;
+  justify-content: center;
+  align-items: flex-end;
+  height: 100%;
+  outline: none;
+}
+
+.day-bar {
+  width: 100%;
+  max-width: 24px;
+  border-radius: 4px 4px 0 0;
+  background: var(--accent);
+  opacity: 0.8;
+}
+
+.day-col.is-hover .day-bar,
+.day-col:focus-visible .day-bar {
+  opacity: 1;
+}
+
+.day-col.is-hover,
+.day-col:focus-visible {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.chart-tip {
+  position: absolute;
+  top: -6px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-3);
+  box-shadow: var(--shadow);
+  font-size: 12px;
+  white-space: nowrap;
+  transform: translate(-50%, -100%);
+  pointer-events: none;
+}
+
+.chart-tip span {
+  color: var(--muted);
+}
+
+.day-labels {
+  display: flex;
+  justify-content: space-between;
+  margin: 6px 0 0 36px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chart-table {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chart-table summary {
+  cursor: pointer;
+}
+
+.chart-table table {
+  margin-top: 8px;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-table th,
+.chart-table td {
+  padding: 2px 16px 2px 0;
+  text-align: left;
+}
+
+.rank-bars,
+.rank-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rank-bars button,
+.rank-list button {
+  width: 100%;
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+}
+
+.rank-bars button {
+  grid-template-columns: minmax(72px, 0.9fr) 2fr 40px;
+}
+
+.rank-list button {
+  grid-template-columns: 24px 1fr auto;
+}
+
+.rank-bars button:hover,
+.rank-list button:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.rank-name,
+.rank-meta b,
+.rank-meta small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rank-name {
+  font-size: 13px;
+}
+
+.rank-track {
+  height: 10px;
+}
+
+.rank-fill {
+  display: block;
+  height: 100%;
+  min-width: 4px;
+  border-radius: 0 4px 4px 0;
+  background: var(--accent);
+  opacity: 0.8;
+}
+
+.rank-value,
+.rank-idx {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.rank-meta {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.rank-meta b {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.rank-meta small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* ---- 键盘焦点 ---- */
+
+button:focus-visible,
+[role="slider"]:focus-visible,
+[tabindex]:focus-visible,
+input[type="range"]:focus-visible,
+summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.search:focus-within {
+  border-color: rgba(215, 165, 110, 0.5);
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ---- 减少动态效果 ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  .is-spinning,
+  .eq-mini {
+    animation: none;
+  }
+
+  * {
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ---- 窄窗口 ---- */
+
+@media (max-width: 1280px) {
+  .app {
+    grid-template-columns: 232px 1fr 260px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .app {
+    grid-template-columns: 220px 1fr;
+  }
+
+  .upcoming {
+    display: none;
+  }
+
+  .player {
+    grid-template-columns: 1fr 1.4fr auto;
+  }
+
+  .viz {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .app {
+    grid-template-columns: 1fr;
+    grid-template-rows: 56px 1fr auto;
+  }
+
+  .sidebar,
+  .brand div,
+  .topbar .ghost-btn {
+    display: none;
+  }
+
+  .topbar {
+    padding: 0 16px;
+  }
+
+  .main {
+    padding: 20px 16px;
+  }
+
+  .player {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    padding: 10px 16px 14px;
+  }
+
+  .player > * {
+    min-width: 0;
+  }
+
+  .player-extra {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  .search {
+    min-width: 0;
+  }
+
+  .search input {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .vol {
+    width: 72px;
+  }
+
+  .track-head,
+  .track-row {
+    grid-template-columns: 32px minmax(0, 1fr) 52px;
+  }
+
+  .col-album {
+    display: none;
+  }
+
+  .stat-columns {
+    grid-template-columns: 1fr;
+  }
 }
