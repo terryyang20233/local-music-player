@@ -80,7 +80,7 @@ All under `data/` (gitignored):
 | `listens.json` | Listening events (up to 10,000), likes and dislikes |
 | `playlists.json` | Playlists |
 | `library-cache.json` | Parsed tags keyed by path, size and mtime, so rescans only re-read changed files |
-| `lyrics/` | Downloaded lyrics, one file per track. A track with no match is retried after 14 days |
+| `lyrics/` | Downloaded lyrics, one file per track. A track with no match is retried after 14 days. `npm run lyrics` fetches the whole library at once while the app is running (`npm run lyrics -- --retry` re-checks misses and plain-text matches) |
 
 Writes are atomic (temp file + rename). If a file cannot be parsed it is renamed to `*.corrupt-<time>.json` instead of being overwritten.
 

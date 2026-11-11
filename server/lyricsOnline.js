@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import path from "node:path";
+import * as OpenCCToTraditional from "opencc-js/cn2t";
 import * as OpenCC from "opencc-js/t2cn";
 import { pinyin } from "pinyin-pro";
 import { loadLyrics, parseLrc } from "./lyrics.js";
@@ -21,6 +22,14 @@ const ERROR_COOLDOWN_MS = 60 * 1000;
 const MAX_DURATION_DIFF = 3;
 
 const toSimplified = OpenCC.Converter({ from: "tw", to: "cn" });
+const toTraditionalText = OpenCCToTraditional.Converter({ from: "cn", to: "tw" });
+const HAN = /[\u3400-\u9fff]/;
+
+/** 繁体写法：歌词库里不少台湾、香港歌手的歌只有繁体歌名（愛人錯過、單車）。 */
+function toTraditional(text) {
+  const value = String(text ?? "");
+  return HAN.test(value) && !/[\u3040-\u30ff]/.test(value) ? toTraditionalText(value) : value;
+}
 
 /**
  * 歌词库里不少中文歌词是繁体，界面和标签是简体，统一转成简体。
@@ -47,19 +56,39 @@ function pinyinKey(text) {
   return compact(pinyin(value, { toneType: "none", type: "array", nonZh: "consecutive" }).join(""));
 }
 
-/** 比较用的歌名：去掉括号里的版本说明和 " - 副标题"。「句号 - Full Stop」→「句号」。 */
+/** 比较用的歌名：统一成简体，去掉括号里的版本说明和 " - 副标题"。「句号 - Full Stop」→「句号」。 */
 function titleKey(title) {
-  const text = String(title ?? "").normalize("NFKC");
+  const text = simplify(String(title ?? "").normalize("NFKC"));
   const base = text
     .replace(/[(（[【].*?[)）\]】]/g, " ")
     .split(/\s+[-–—]\s+/)[0];
   return compact(base) || compact(text);
 }
 
+/** 搜索用的歌名：去掉括号里的说明。「Don't Stop Believing(Complete version…)」→「Don't Stop Believing」。 */
+function searchTitle(title) {
+  const text = String(title ?? "");
+  return text.replace(/[(（[【《].*?[)）\]】》]/g, " ").replace(/\s+/g, " ").trim() || text.trim();
+}
+
+/** 歌名后面紧跟这些字符时，算作同一首歌加了副标题。 */
+const SUBTITLE_START = /^[\s\-–—_~·:：(（[【《/|]/;
+
 function sameTitle(a, b) {
   const ka = titleKey(a);
   const kb = titleKey(b);
-  return Boolean(ka) && (ka === kb || pinyinKey(ka) === pinyinKey(kb));
+  if (!ka || !kb) return false;
+  if (ka === kb || pinyinKey(ka) === pinyinKey(kb)) return true;
+  // 一边多了副标题：「偏爱-《仙剑奇侠传3》电视剧插曲」和「偏爱」
+  const na = simplify(searchTitle(a).normalize("NFKC")).toLowerCase();
+  const nb = simplify(searchTitle(b).normalize("NFKC")).toLowerCase();
+  const [short, long] = na.length <= nb.length ? [na, nb] : [nb, na];
+  return short.length > 0 && long.startsWith(short) && SUBTITLE_START.test(long.slice(short.length));
+}
+
+/** 多位歌手时的第一位："Hardwell/Sound Rush" → "Hardwell"。 */
+function firstArtist(name) {
+  return String(name ?? "").split(/\s*(?:[,，、&/;；]|\bfeat\.?|\bft\.?)\s*/i)[0].trim();
 }
 
 /** 拆分歌手名时忽略的常见词，免得 "The Script" 靠一个 "the" 就和别的歌手对上。 */
@@ -67,7 +96,7 @@ const ARTIST_STOPWORDS = new Set(["the", "and", "band", "with"]);
 
 /** 歌手名拆成几段：合唱、feat.、"G.E.M. 邓紫棋" 这种中英混写都能对上。 */
 function artistParts(name) {
-  const text = String(name ?? "").normalize("NFKC");
+  const text = simplify(String(name ?? "").normalize("NFKC"));
   const parts = text
     .split(/\s*(?:[,，、&/;；]|\bfeat\.?|\bft\.?|\s)\s*/i)
     .map(compact)
@@ -76,8 +105,9 @@ function artistParts(name) {
 }
 
 export function artistMatches(ours, theirs) {
-  const theirCompact = compact(theirs);
-  const theirPinyin = pinyinKey(theirs);
+  const theirText = simplify(String(theirs ?? "").normalize("NFKC"));
+  const theirCompact = compact(theirText);
+  const theirPinyin = pinyinKey(theirText);
   if (theirCompact.length < 2) return false;
   return artistParts(ours).some((part) => {
     const py = pinyinKey(part);
@@ -186,23 +216,50 @@ export class LyricsService {
     return kind === "search" ? (Array.isArray(data) ? data : []) : data;
   }
 
-  /** 先精确匹配；没有歌词再按歌名 + 歌手搜，最后只按歌名搜（歌手写法不同时）。 */
+  /**
+   * 先精确匹配；拿不到带时间轴的歌词，就依次换几种搜法，找到带时间轴的就停：
+   * 歌名 + 歌手 → 繁体歌名 + 繁体歌手 → 只用第一位歌手 → 只按歌名（要求歌手对得上）→ 只按繁体歌名。
+   * 都只有纯文本时返回纯文本；只有"纯音乐"标记时返回该标记。
+   */
   async lookup(track) {
-    const title = track.title;
-    const artist = track.artist;
+    const title = searchTitle(track.title);
+    const artist = String(track.artist ?? "");
     const duration = Math.round(Number(track.duration) || 0);
-    let exact = null;
+    // strict：搜索时已经按歌手筛过；loose：只按歌名搜到的，还要检查歌手
+    const strict = [];
+    const loose = [];
+    const best = () => {
+      const winners = [pickLyrics(strict, track), pickLyrics(loose, track, { requireArtist: true })];
+      return pickLyrics(winners.filter(Boolean), track);
+    };
+
     if (track.album && duration) {
-      exact = await this.#request("get", { track_name: title, artist_name: artist, album_name: track.album, duration: String(duration) });
-      if (hasText(exact)) return exact;
+      const exact = await this.#request("get", {
+        track_name: track.title,
+        artist_name: artist,
+        album_name: track.album,
+        duration: String(duration),
+      });
+      if (exact?.syncedLyrics) return exact;
+      if (exact) strict.push(exact);
     }
-    const byArtist = await this.#request("search", { track_name: title, artist_name: artist });
-    const best = pickLyrics([exact, ...byArtist], track);
-    if (hasText(best)) return best;
-    const byTitle = await this.#request("search", { track_name: title });
-    const loose = pickLyrics(byTitle, track, { requireArtist: true });
-    if (hasText(loose)) return loose;
-    return best || loose || null;
+
+    const tradTitle = toTraditional(title);
+    const tradArtist = toTraditional(artist);
+    const first = firstArtist(artist);
+    /** @type {[Record<string, string>, any[]][]} */
+    const searches = [[{ track_name: title, artist_name: artist }, strict]];
+    if (tradTitle !== title || tradArtist !== artist) searches.push([{ track_name: tradTitle, artist_name: tradArtist }, strict]);
+    if (first && first !== artist) searches.push([{ track_name: title, artist_name: first }, strict]);
+    searches.push([{ track_name: title }, loose]);
+    if (tradTitle !== title) searches.push([{ track_name: tradTitle }, loose]);
+
+    for (const [params, pool] of searches) {
+      pool.push(...(await this.#request("search", params)));
+      const found = best();
+      if (found?.syncedLyrics) return found;
+    }
+    return best();
   }
 
   async #fetchAndStore(track) {

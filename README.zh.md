@@ -80,7 +80,7 @@ npm install && npm run restart
 | `listens.json` | 听歌记录（最多 10000 条）、喜欢、不喜欢 |
 | `playlists.json` | 歌单 |
 | `library-cache.json` | 按路径、大小、修改时间缓存的标签，重新扫描只读有变化的文件 |
-| `lyrics/` | 在线下载的歌词，每首一个文件。没找到的歌 14 天后会再查一次 |
+| `lyrics/` | 在线下载的歌词，每首一个文件。没找到的歌 14 天后会再查一次。唱机运行时执行 `npm run lyrics` 可以一次查完整个曲库（`npm run lyrics -- --retry` 会把没找到的和只有纯文本的重新查一遍） |
 
 写入是原子的（先写临时文件再改名）。文件损坏时会被改名为 `*.corrupt-<时间>.json` 保留下来，不会被覆盖。
 

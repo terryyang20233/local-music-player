@@ -18,6 +18,7 @@
     "app": "bash scripts/launch.sh",
     "install-app": "bash scripts/install-app.sh",
     "restart": "bash scripts/restart.sh",
+    "lyrics": "node scripts/fetch-lyrics.js",
     "eval": "node server/eval.js",
     "test": "vitest run",
     "lint": "eslint .",

@@ -4,10 +4,14 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { LyricsService, artistMatches, pickLyrics, simplify } from "../server/lyricsOnline.js";
 
-const SYNCED = "[00:01.00]如果那兩個字沒有顫抖\n[00:05.00]我不會發現";
+// 测试用的占位文字（繁体），不是真实歌词
+const SYNCED = "[00:01.00]這是第一行測試歌詞\n[00:05.00]這是第二行";
 
-/** 假的 LRCLIB：按接口和参数返回预设结果，并记录请求过的 URL。 */
-function fakeLrclib({ get = null, byArtist = [], byTitle = [], fail = false } = {}) {
+/**
+ * 假的 LRCLIB：按接口和参数返回预设结果，并记录请求过的 URL。
+ * search 传函数时按查询参数返回结果（用来模拟只有繁体歌名能搜到之类的情况）。
+ */
+function fakeLrclib({ get = null, byArtist = [], byTitle = [], search = null, fail = false } = {}) {
   const calls = [];
   const fetchImpl = async (url) => {
     calls.push(url);
@@ -15,6 +19,7 @@ function fakeLrclib({ get = null, byArtist = [], byTitle = [], fail = false } = 
     const u = new URL(url);
     let body;
     if (u.pathname.endsWith("/get")) body = get;
+    else if (search) body = search(Object.fromEntries(u.searchParams));
     else body = u.searchParams.has("artist_name") ? byArtist : byTitle;
     if (body == null) return { ok: false, status: 404, json: async () => ({}) };
     return { ok: true, status: 200, json: async () => body };
@@ -48,7 +53,7 @@ describe("LyricsService", () => {
     const service = new LyricsService(dir, { fetchImpl: lrclib.fetchImpl });
     const first = await service.get(track());
     expect(first).toMatchObject({ status: "found", source: "lrclib", synced: true });
-    expect(first.lines[0]).toEqual({ time: 1, text: "如果那两个字没有颤抖" });
+    expect(first.lines[0]).toEqual({ time: 1, text: "这是第一行测试歌词" });
 
     // 换一个实例（相当于重启）也直接读缓存，不再联网
     const again = await new LyricsService(dir, { fetchImpl: lrclib.fetchImpl }).get(track());
@@ -86,7 +91,8 @@ describe("LyricsService", () => {
     const service = new LyricsService(dir, { fetchImpl: lrclib.fetchImpl, now: () => now });
     expect((await service.get(track())).status).toBe("missing");
     const afterFirst = lrclib.calls.length;
-    expect(afterFirst).toBe(3);
+    // 精确匹配 + 歌名歌手 + 繁体歌名歌手（陈奕迅 → 陳奕迅）+ 只按歌名
+    expect(afterFirst).toBe(4);
 
     await service.get(track());
     expect(lrclib.calls).toHaveLength(afterFirst);
@@ -112,12 +118,63 @@ describe("LyricsService", () => {
   });
 
   it("同一首歌同时请求只联网一次", async () => {
-    const lrclib = fakeLrclib({ get: { trackName: "十年", artistName: "陈奕迅", duration: 205, plainLyrics: "第一行" } });
+    const lrclib = fakeLrclib({ get: { trackName: "十年", artistName: "陈奕迅", duration: 205, syncedLyrics: SYNCED } });
     const service = new LyricsService(null, { fetchImpl: lrclib.fetchImpl });
     const [a, b] = await Promise.all([service.get(track()), service.get(track())]);
     expect(a).toEqual(b);
-    expect(a).toMatchObject({ status: "found", synced: false });
+    expect(a).toMatchObject({ status: "found", synced: true });
     expect(lrclib.calls).toHaveLength(1);
+  });
+
+  it("简体搜不到时用繁体歌名和歌手再搜", async () => {
+    const lrclib = fakeLrclib({
+      search: (q) =>
+        q.track_name === "愛人錯過" && q.artist_name === "告五人"
+          ? [{ trackName: "愛人錯過", artistName: "告五人", duration: 292, syncedLyrics: SYNCED }]
+          : [],
+    });
+    const service = new LyricsService(null, { fetchImpl: lrclib.fetchImpl });
+    const result = await service.get(track({ title: "爱人错过", artist: "告五人", duration: 292 }));
+    expect(result).toMatchObject({ status: "found", synced: true });
+    expect(result.lines[0].text).toBe("这是第一行测试歌词");
+  });
+
+  it("简体条目误标为纯音乐、繁体条目有歌词时，用有歌词的", async () => {
+    const instrumental = { trackName: "单车", artistName: "陈奕迅", duration: 211, instrumental: true };
+    const lrclib = fakeLrclib({
+      get: instrumental,
+      search: (q) =>
+        q.track_name === "單車"
+          ? [{ trackName: "單車", artistName: "陳奕迅", duration: 211, syncedLyrics: SYNCED }]
+          : [instrumental],
+    });
+    const service = new LyricsService(null, { fetchImpl: lrclib.fetchImpl });
+    expect(await service.get(track({ title: "单车", duration: 211 }))).toMatchObject({ status: "found", synced: true });
+  });
+
+  it("多位歌手时用第一位歌手搜", async () => {
+    const lrclib = fakeLrclib({
+      search: (q) =>
+        q.artist_name === "Hardwell" ? [{ trackName: "Iris", artistName: "Hardwell", duration: 203, syncedLyrics: SYNCED }] : [],
+    });
+    const service = new LyricsService(null, { fetchImpl: lrclib.fetchImpl });
+    const result = await service.get(track({ title: "Iris", artist: "Hardwell/Sound Rush", album: "Iris", duration: 203 }));
+    expect(result).toMatchObject({ status: "found", synced: true });
+  });
+
+  it("精确匹配只有纯文本时，继续找带时间轴的版本；找不到再用纯文本", async () => {
+    const plain = { trackName: "十年", artistName: "陈奕迅", duration: 205, plainLyrics: "纯文本" };
+    const upgraded = fakeLrclib({
+      get: plain,
+      search: (q) => (q.artist_name ? [{ trackName: "十年", artistName: "陈奕迅", duration: 206, syncedLyrics: SYNCED }] : []),
+    });
+    const service = new LyricsService(null, { fetchImpl: upgraded.fetchImpl });
+    expect(await service.get(track())).toMatchObject({ status: "found", synced: true });
+
+    const plainOnly = fakeLrclib({ get: plain });
+    const fallback = await new LyricsService(null, { fetchImpl: plainOnly.fetchImpl }).get(track());
+    expect(fallback).toMatchObject({ status: "found", synced: false });
+    expect(fallback.lines[0].text).toBe("纯文本");
   });
 
   it("本地 .lrc 优先；关掉在线查找或缺少歌手信息时不联网", async () => {
@@ -160,9 +217,15 @@ describe("歌词匹配", () => {
     expect(picked.syncedLyrics).toBe("[00:01]更接近");
   });
 
+  it("歌名后面紧跟副标题也算同一首，但前缀相同的别的歌不算", () => {
+    const t = { title: "偏爱", artist: "张芸京", duration: 213 };
+    expect(pickLyrics([{ trackName: "偏爱-《电视剧插曲》", duration: 213, syncedLyrics: "[00:01]x" }], t)).not.toBeNull();
+    expect(pickLyrics([{ trackName: "偏爱你", duration: 213, syncedLyrics: "[00:01]x" }], t)).toBeNull();
+  });
+
   it("繁体转简体，日文不转", () => {
-    expect(simplify("我們終於來到")).toBe("我们终于来到");
-    expect(simplify("君の話を聞かせて")).toBe("君の話を聞かせて");
+    expect(simplify("這個測試會轉換")).toBe("这个测试会转换");
+    expect(simplify("日本語の話です")).toBe("日本語の話です");
     expect(simplify("Hello")).toBe("Hello");
   });
 });
