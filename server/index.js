@@ -3,10 +3,10 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { expandHome, legacyId, publicTrack, readEmbeddedCover, scanLibrary } from "./library.js";
-import { loadLyrics } from "./lyrics.js";
+import { LyricsService } from "./lyricsOnline.js";
 import { Playlists } from "./playlists.js";
 import { Recommender } from "./recommend.js";
-import { listeningStats } from "./stats.js";
+import { listeningHistory, listeningStats } from "./stats.js";
 import { readJson, writeJsonAtomic } from "./store.js";
 import { streamTrack } from "./stream.js";
 
@@ -16,7 +16,7 @@ const distDir = path.join(rootDir, "dist");
 
 function loadConfig() {
   const configPath = path.join(rootDir, "config.json");
-  const fallback = { musicDir: "~/Desktop/music-resources", port: 8787 };
+  const fallback = { musicDir: "~/Desktop/music-resources", port: 8787, onlineLyrics: true };
   try {
     const raw = JSON.parse(fs.readFileSync(configPath, "utf8"));
     return { ...fallback, ...raw };
@@ -33,6 +33,11 @@ const dataDir = process.env.DATA_DIR ? expandHome(process.env.DATA_DIR) : path.j
 
 const recommender = new Recommender(dataDir);
 const playlists = new Playlists(dataDir);
+// 本地没有歌词时到 LRCLIB 查找；ONLINE_LYRICS=0 或 config.json 里 "onlineLyrics": false 可以关掉
+const onlineLyrics = process.env.ONLINE_LYRICS != null
+  ? !/^(0|false|no|off)$/i.test(process.env.ONLINE_LYRICS)
+  : config.onlineLyrics !== false;
+const lyricsService = new LyricsService(dataDir, { online: onlineLyrics });
 
 // ---- 曲库 ----
 
@@ -191,13 +196,53 @@ app.post("/api/feedback", (req, res) => {
     res.status(400).json({ error: "trackId required" });
     return;
   }
-  if (disliked) recommender.setDislike(trackId);
-  else recommender.setLike(trackId, Boolean(liked));
+  if (disliked === false) {
+    // 撤销"不喜欢"，同时恢复标记前的喜欢状态
+    recommender.clearDislike(trackId);
+    if (liked) recommender.setLike(trackId, true);
+  } else if (disliked) {
+    recommender.setDislike(trackId);
+  } else {
+    recommender.setLike(trackId, Boolean(liked));
+  }
   res.json({ ok: true, liked: Boolean(recommender.likes[trackId]), disliked: Boolean(recommender.dislikes[trackId]) });
 });
 
-app.get("/api/stats", (_req, res) => {
-  res.json(listeningStats(recommender.events, tracks));
+/** 统计 / 记录的范围：?track=ID、?artist=名字 或 ?album=专辑&albumArtist=专辑艺人；都不传就是全部。 */
+function statsFilter(query) {
+  if (typeof query.track === "string" && query.track) return { trackId: query.track };
+  if (typeof query.artist === "string") return { artist: query.artist };
+  if (typeof query.album === "string") {
+    return { album: query.album, albumArtist: typeof query.albumArtist === "string" ? query.albumArtist : undefined };
+  }
+  return null;
+}
+
+const queryNumber = (value) => {
+  const n = value == null || value === "" ? NaN : Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+app.get("/api/stats", (req, res) => {
+  res.json(
+    listeningStats(recommender.events, tracks, {
+      range: typeof req.query.range === "string" ? req.query.range : "30d",
+      filter: statsFilter(req.query),
+    }),
+  );
+});
+
+app.get("/api/history", (req, res) => {
+  res.json(
+    listeningHistory(recommender.events, tracks, {
+      from: queryNumber(req.query.from) ?? -Infinity,
+      to: queryNumber(req.query.to) ?? Infinity,
+      before: queryNumber(req.query.before),
+      limit: Math.min(200, Math.max(1, queryNumber(req.query.limit) ?? 50)),
+      hideSkips: req.query.hideSkips === "1",
+      filter: statsFilter(req.query),
+    }),
+  );
 });
 
 // ---- 封面 / 歌词 ----
@@ -257,12 +302,11 @@ app.get(
   "/api/lyrics/:id",
   asyncRoute(async (req, res) => {
     const track = byId.get(req.params.id);
-    const lyrics = track?.hasLyrics ? await loadLyrics(track) : null;
-    if (!lyrics) {
-      res.status(404).json({ error: "No lyrics" });
+    if (!track) {
+      res.status(404).json({ error: "Track not found" });
       return;
     }
-    res.json(lyrics);
+    res.json(await lyricsService.get(track, { refresh: req.query.refresh === "1" }));
   }),
 );
 
@@ -279,6 +323,16 @@ app.post("/api/playlists", (req, res) => {
     return;
   }
   if (typeof req.body?.trackId === "string") playlists.addTrack(playlist.id, req.body.trackId);
+  res.json({ playlist });
+});
+
+// 撤销删除：按原 ID 放回原位置
+app.post("/api/playlists/restore", (req, res) => {
+  const playlist = playlists.restore(req.body?.playlist, req.body?.index);
+  if (!playlist) {
+    res.status(400).json({ error: "invalid playlist" });
+    return;
+  }
   res.json({ playlist });
 });
 

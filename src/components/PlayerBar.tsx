@@ -51,6 +51,8 @@ type Props = {
   onDislike?: () => void;
   replayGain: boolean;
   onToggleReplayGain: () => void;
+  onSelectArtist: (artist: string) => void;
+  onSelectAlbum: (track: Track) => void;
 };
 
 const MODES: { id: PlayMode; label: string; hint: string }[] = [
@@ -58,7 +60,7 @@ const MODES: { id: PlayMode; label: string; hint: string }[] = [
   { id: "repeat-one", label: "单曲循环", hint: "只循环当前这一首" },
   { id: "repeat-artist", label: "歌手循环", hint: "只播放当前歌手的作品" },
   { id: "shuffle", label: "随机播放", hint: "打乱顺序播放" },
-  { id: "smart", label: "智能推荐", hint: "下一首由本地机器学习模型挑选" },
+  { id: "smart", label: "智能推荐", hint: "根据你的听歌习惯挑下一首" },
 ];
 
 function ModeIcon({ mode }: { mode: PlayMode }) {
@@ -96,6 +98,8 @@ export function PlayerBar({
   onDislike,
   replayGain,
   onToggleReplayGain,
+  onSelectArtist,
+  onSelectAlbum,
 }: Props) {
   const cycleMode = () => {
     const i = MODES.findIndex((m) => m.id === mode);
@@ -120,7 +124,19 @@ export function PlayerBar({
         )}
         <div className="now-text">
           <strong>{current?.title || "尚未播放"}</strong>
-          <span>{current ? `${current.artist} · ${current.album}` : "从曲库里选一首开始"}</span>
+          {current ? (
+            <span>
+              <button className="row-link" type="button" onClick={() => onSelectArtist(current.artist)} title={`查看歌手 ${current.artist}`}>
+                {current.artist}
+              </button>
+              {" · "}
+              <button className="row-link" type="button" onClick={() => onSelectAlbum(current)} title={`查看专辑 ${current.album}`}>
+                {current.album}
+              </button>
+            </span>
+          ) : (
+            <span>从曲库里选一首开始</span>
+          )}
         </div>
         <Visualizer getAnalyser={getAnalyser} playing={playing} />
       </div>
@@ -152,7 +168,7 @@ export function PlayerBar({
       <div className="player-extra">
         <button
           className={`icon-btn like-btn ${liked ? "is-liked" : ""}`}
-          title={liked ? "取消喜欢" : "喜欢，作为正样本"}
+          title={liked ? "取消喜欢" : "喜欢：之后多推荐类似的歌"}
           aria-label={liked ? "取消喜欢" : "喜欢"}
           aria-pressed={liked}
           onClick={onToggleLike}
@@ -163,7 +179,7 @@ export function PlayerBar({
         </button>
         <button
           className="icon-btn"
-          title="不喜欢：跳过并少推荐这类"
+          title="不喜欢：跳过，之后少推荐类似的歌"
           aria-label="不喜欢"
           onClick={onDislike}
           type="button"

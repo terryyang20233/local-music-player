@@ -9,10 +9,11 @@ The UI is in Chinese. Audio files and play history are **not** in this repo.
 ## Features
 
 - FLAC from a local folder, read with a built-in parser (Vorbis tags, track/disc numbers, ReplayGain, embedded cover); MP3 / M4A / OGG / Opus through `music-metadata`
-- Album art from the embedded picture or a `cover.jpg` / `folder.jpg` next to the files; synced lyrics from a `.lrc` with the same name
+- Album art from the embedded picture or a `cover.jpg` / `folder.jpg` next to the files
+- Synced lyrics from a `.lrc` with the same name or the file's own lyrics tag; otherwise downloaded from [LRCLIB](https://lrclib.net) (open, no account) when a track starts, cached on disk and converted to simplified Chinese
 - Repeat one, repeat artist, shuffle, repeat all, plus a **smart** mode that picks the next track
 - Playing from an artist, album, playlist or search plays *that list*; right-click any track for **play next**, **add to queue**, playlists, like / dislike
-- Playlists, a **Liked** view and a **Listening stats** page
+- Playlists, a **Liked** view and a **Listening stats** page: 7 / 30 / 90 days, this year or everything; plays per day, hour and weekday; top songs, artists, albums and most-skipped; every listen with time and how much was heard; click any song, artist or album for its own stats
 - Search by title, artist, album — or by pinyin (`zjl`, `zhoujielun`)
 - Media keys, headset buttons and macOS Now Playing (Media Session API)
 - Picks up where you left off (track, position, queue) after a reload
@@ -52,7 +53,13 @@ On macOS, generate a local **唱机.app** (Desktop + `~/Applications`) with:
 npm run install-app
 ```
 
-The first launch builds the UI and opens a browser. Quitting from the Dock stops the background server. Do not commit `唱机.app`; it is machine-specific (it stores your clone path). The launcher only builds the UI when `dist/` is missing, so after pulling changes run `npm install && npm run build` before restarting the app.
+The first launch builds the UI and opens a browser. Quitting from the Dock stops the background server. Do not commit `唱机.app`; it is machine-specific (it stores your clone path). The launcher only builds the UI when `dist/` is missing, so after pulling or editing code run:
+
+```bash
+npm install && npm run restart
+```
+
+`npm run restart` rebuilds the UI, stops the server the Dock app started and launches it again.
 
 ## Playback
 
@@ -61,7 +68,7 @@ The first launch builds the UI and opens a browser. Quitting from the Dock stops
 - **Speed**: `0.5x`–`2x`; click to cycle, hover or focus to pick an exact value
 - The progress bar is draggable and keyboard-operable; volume is at the bottom right
 - 👎 marks a track as disliked: it is skipped now and recommended much less later
-- The right panel switches between **Up next** and **Lyrics** (click a line to jump there)
+- The right panel switches between **Up next** and **Lyrics** (click a line to jump there). The lyrics panel shows where the lyrics came from; **Search again** retries a track that had none
 - A track that fails to play is skipped automatically; after three failures in a row playback stops
 
 ## Data files
@@ -73,6 +80,7 @@ All under `data/` (gitignored):
 | `listens.json` | Listening events (up to 10,000), likes and dislikes |
 | `playlists.json` | Playlists |
 | `library-cache.json` | Parsed tags keyed by path, size and mtime, so rescans only re-read changed files |
+| `lyrics/` | Downloaded lyrics, one file per track. A track with no match is retried after 14 days |
 
 Writes are atomic (temp file + rename). If a file cannot be parsed it is renamed to `*.corrupt-<time>.json` instead of being overwritten.
 
@@ -149,6 +157,7 @@ CI runs the same checks and a production build on every push and pull request.
 ## Privacy
 
 - No accounts, analytics, or remote ML APIs. Everything stays in `data/` on disk.
+- The one network request: when a track without local lyrics starts, its title, artist, album and duration are sent to [lrclib.net](https://lrclib.net) to find lyrics. Listening history is never sent. Turn it off with `"onlineLyrics": false` in `config.json` or `ONLINE_LYRICS=0`.
 - The HTTP server binds to **127.0.0.1** by default so the library is not exposed on your LAN, and rejects requests whose `Host` is not local (protection against DNS rebinding). Override with `HOST=0.0.0.0` only if you intend to share it on a trusted network.
 - `/api/library` and `/api/stream` can list and play local files for anyone who can reach the process. Keep the bind address loopback unless you know you need otherwise.
 

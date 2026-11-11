@@ -236,6 +236,14 @@ export class Recommender {
     this.record({ type: "dislike", trackId, progress: 0, reason: "feedback" });
   }
 
+  /** 撤销"不喜欢"。之前记下的 dislike 事件会因为不在 dislikes 里而不再当样本。 */
+  clearDislike(trackId) {
+    if (!trackId || !this.dislikes[trackId]) return;
+    delete this.dislikes[trackId];
+    this.dirty = true;
+    this.save();
+  }
+
   /** 训练标签；已经撤销的"喜欢 / 不喜欢"不再当样本。 */
   #label(event) {
     if (event.type === "like" && !this.likes[event.trackId]) return null;
@@ -449,12 +457,11 @@ export class Recommender {
   }
 
   #reason(row, seed) {
-    const pct = Math.round(row.pLike * 100);
     if (seed && row.transSim >= 0.5) return `常和《${seed.title}》连着听`;
     if (seed && row.track.artist === seed.artist) return `同一歌手 · ${row.track.artist}`;
-    if (!seed && row.seqSim > 0.62 && this.metrics.positives >= 3) return "和你最近的听歌序列相近";
-    if (this.metrics.trained && row.pLike >= 0.58) return `口味匹配 ${pct}%`;
+    if (!seed && row.seqSim > 0.62 && this.metrics.positives >= 3) return "和你最近常听的歌相近";
+    if (this.metrics.trained && row.pLike >= 0.58) return "符合你的口味";
     if (seed) return `和《${seed.title}》风格相近`;
-    return this.metrics.trained ? `口味匹配 ${pct}%` : "先听几首，模型会跟上你的口味";
+    return this.metrics.trained ? "符合你的口味" : "多听几首，推荐会越来越准";
   }
 }

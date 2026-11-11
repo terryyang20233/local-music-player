@@ -39,6 +39,10 @@ export type PlayOptions = {
   context?: Track[];
   /** 由"上一首"回到历史曲目时为 true，此时不把当前曲目压回历史。 */
   fromHistory?: boolean;
+  /** 从这个位置（秒）开始播放。 */
+  startAt?: number;
+  /** 不上报正在播放的这首（撤销"不喜欢"回到原曲时，刚切过去的那首不算一次跳过）。 */
+  skipReport?: boolean;
 };
 
 type PlayerOptions = {
@@ -226,11 +230,12 @@ export function usePlayer(tracks: Track[], options: PlayerOptions = {}) {
   flushListenRef.current = flushListen;
 
   const playTrack = useCallback((track: Track, opts: PlayOptions = {}) => {
-    const { autoplay = true, context, fromHistory = false } = opts;
+    const { autoplay = true, context, fromHistory = false, startAt, skipReport = false } = opts;
     const audio = ensureAudio();
     const already = loadedIdRef.current === track.id;
     if (sessionRef.current.trackId && sessionRef.current.trackId !== track.id) {
-      flushListen("pick", !fromHistory);
+      if (skipReport) sessionRef.current = emptySession();
+      else flushListen("pick", !fromHistory);
     }
     if (context) setContextIds(context.map((t) => t.id));
     if (userQueueRef.current.includes(track.id)) setUserQueue((q) => q.filter((id) => id !== track.id));
@@ -250,7 +255,10 @@ export function usePlayer(tracks: Track[], options: PlayerOptions = {}) {
     };
 
     if (already) {
-      if (audio.ended) {
+      if (startAt != null && Number.isFinite(audio.duration)) {
+        audio.currentTime = Math.min(Math.max(0, startAt), audio.duration);
+        sessionRef.current.lastPos = audio.currentTime;
+      } else if (audio.ended) {
         audio.currentTime = 0;
         sessionRef.current.lastPos = 0;
       }
@@ -259,6 +267,8 @@ export function usePlayer(tracks: Track[], options: PlayerOptions = {}) {
     }
 
     loadedIdRef.current = track.id;
+    // 元数据到达后由 onMeta 跳到这个位置
+    if (startAt != null && startAt > 0) pendingSeekRef.current = startAt;
     audio.src = streamUrl(track.id);
     // 新曲目的元数据到达前先用曲库里的时长，避免进度条显示上一首的总长
     setDuration(track.duration || 0);
@@ -272,8 +282,19 @@ export function usePlayer(tracks: Track[], options: PlayerOptions = {}) {
   const addToQueue = useCallback((track: Track) => {
     setUserQueue((q) => (q.includes(track.id) ? q : [...q, track.id]));
   }, [setUserQueue]);
+  /** 从手动队列移除，返回它原来的位置（不在队列里时为 -1），用于撤销。 */
   const removeFromQueue = useCallback((id: string) => {
+    const index = userQueueRef.current.indexOf(id);
     setUserQueue((q) => q.filter((x) => x !== id));
+    return index;
+  }, [setUserQueue]);
+  /** 把歌放回手动队列的指定位置。 */
+  const insertIntoQueue = useCallback((track: Track, index: number) => {
+    setUserQueue((q) => {
+      const rest = q.filter((id) => id !== track.id);
+      rest.splice(Math.max(0, Math.min(index, rest.length)), 0, track.id);
+      return rest;
+    });
   }, [setUserQueue]);
 
   const browseRef = useRef(options.browseTracks);
@@ -600,6 +621,7 @@ export function usePlayer(tracks: Track[], options: PlayerOptions = {}) {
     playNext,
     addToQueue,
     removeFromQueue,
+    insertIntoQueue,
     replayGain,
     setReplayGain,
     playTrack,

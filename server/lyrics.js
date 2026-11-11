@@ -44,15 +44,19 @@ export function parseLrc(text) {
   return { synced: false, lines: plain.map((text) => ({ time: null, text })) };
 }
 
-/** 优先读同名 .lrc，没有再用内嵌的 LYRICS 标签。 */
+/** 本地歌词：优先读同名 .lrc，没有再用内嵌的 LYRICS 标签。source 标明来源。 */
 export async function loadLyrics(track) {
   if (track.lyricsFile) {
     try {
-      return parseLrc(await fsp.readFile(track.lyricsFile, "utf8"));
+      const parsed = parseLrc(await fsp.readFile(track.lyricsFile, "utf8"));
+      if (parsed.lines.length) return { source: "file", ...parsed };
     } catch {
       /* 文件被删了就退回内嵌歌词 */
     }
   }
-  if (track.embeddedLyrics) return parseLrc(track.embeddedLyrics);
+  if (track.embeddedLyrics) {
+    const parsed = parseLrc(track.embeddedLyrics);
+    if (parsed.lines.length) return { source: "embedded", ...parsed };
+  }
   return null;
 }

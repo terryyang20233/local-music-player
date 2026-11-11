@@ -171,6 +171,23 @@ describe("Recommender", () => {
     expect(rec.metrics.positives).toBe(0);
   });
 
+  it("撤销不喜欢后，之前的不喜欢事件不再当负样本", () => {
+    const rec = recommender([], { likes: {}, dislikes: {} });
+    rec.setLike("a2t0", true);
+    rec.setDislike("a2t0");
+    expect(rec.likes).toEqual({});
+    rec.clearDislike("a2t0");
+    rec.setLike("a2t0", true);
+    expect(rec.dislikes).toEqual({});
+    expect(Object.keys(rec.likes)).toEqual(["a2t0"]);
+    // 和从没点过"不喜欢"的同一份记录训练结果一致
+    const baseline = recommender(rec.events.filter((e) => e.type !== "dislike"), { likes: { ...rec.likes }, dislikes: {} });
+    baseline.train(library());
+    rec.train(library());
+    expect(rec.metrics.negatives).toBe(baseline.metrics.negatives);
+    expect(rec.metrics.positives).toBe(baseline.metrics.positives);
+  });
+
   it("migrateIds 改写记录、喜欢和不喜欢", () => {
     const rec = recommender([listen("old", T0)], { likes: { old: 5 }, dislikes: { old2: 7 } });
     const changed = rec.migrateIds(new Map([["old", "new"], ["old2", "new2"]]));

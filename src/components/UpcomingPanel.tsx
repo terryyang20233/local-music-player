@@ -9,7 +9,7 @@ const MODE_HINT: Record<PlayMode, string> = {
   "repeat-one": "切歌后按顺序",
   "repeat-artist": "同一歌手",
   shuffle: "随机队列",
-  smart: "模型下一首",
+  smart: "按你的口味挑选",
 };
 
 type Props = {

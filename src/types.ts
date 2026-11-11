@@ -57,19 +57,68 @@ export type Playlist = {
 
 export type LyricLine = { time: number | null; text: string };
 
-export type Lyrics = { synced: boolean; lines: LyricLine[] };
+/** 歌词查找结果。source：同名 .lrc 文件 / 音频内嵌标签 / LRCLIB 在线歌词库。 */
+export type LyricsResult =
+  | { status: "found"; source: "file" | "embedded" | "lrclib"; synced: boolean; lines: LyricLine[] }
+  | { status: "instrumental" | "missing" | "error"; source?: string; online?: boolean };
+
+export type StatsRange = "7d" | "30d" | "90d" | "year" | "all";
+
+/** 统计范围：某首歌、某位歌手或某张专辑。 */
+export type StatsFilter = { trackId: string } | { artist: string } | { album: string; albumArtist: string };
+
+/** 一次收听的结果：完播 / 听了大半 / 听了一部分 / 跳过。 */
+export type ListenOutcome = "completed" | "most" | "partial" | "skipped";
+
+export type StatsCount = { plays: number; seconds: number };
+
+export type TrackStatRow = {
+  id: string;
+  plays: number;
+  skips: number;
+  completed: number;
+  seconds: number;
+  lastPlayed: number;
+};
 
 export type ListeningStats = {
-  totalPlays: number;
-  totalSeconds: number;
-  completionRate: number;
-  skipRate: number;
-  distinctTracks: number;
+  range: StatsRange;
+  from: number;
+  to: number;
+  unit: "day" | "week" | "month";
+  totals: {
+    listens: number;
+    plays: number;
+    skips: number;
+    completed: number;
+    seconds: number;
+    completionRate: number;
+    skipRate: number;
+    distinctTracks: number;
+    distinctArtists: number;
+    activeDays: number;
+  };
   firstListen: number | null;
-  daily: { day: string; plays: number }[];
-  topTracks: { id: string; plays: number }[];
-  topArtists: { artist: string; plays: number }[];
+  lastListen: number | null;
+  timeline: { start: number; end: number; plays: number; skips: number; seconds: number }[];
+  hours: StatsCount[];
+  weekdays: StatsCount[];
+  topTracks: TrackStatRow[];
+  topArtists: { artist: string; plays: number; seconds: number; tracks: number }[];
+  topAlbums: { album: string; artist: string; plays: number; seconds: number; coverId: string | null }[];
+  mostSkipped: TrackStatRow[];
 };
+
+export type HistoryItem = {
+  ts: number;
+  trackId: string;
+  seconds: number;
+  duration: number;
+  progress: number;
+  outcome: ListenOutcome;
+};
+
+export type HistoryPage = { items: HistoryItem[]; total: number; next: number | null };
 
 export type ListenReport = {
   trackId: string;

@@ -1,7 +1,7 @@
 import { memo } from "react";
 import { coverUrl } from "../api";
 import { CoverArt } from "./CoverArt";
-import { IconSpark } from "./Icons";
+import { IconPlay, IconSpark } from "./Icons";
 import type { RecommendItem, RecommendResponse, Track } from "../types";
 
 type Props = {
@@ -15,17 +15,30 @@ type Props = {
 };
 
 export const RecommendPanel = memo(function RecommendPanel({ items, metrics, currentId, playing, onPlay, onPlaySmart, onMenu }: Props) {
+  const trained = Boolean(metrics?.trained);
   return (
     <div className="rec-wrap">
       <div className="rec-status">
         <IconSpark size={16} />
-        <p>
-          {metrics?.trained
-            ? `逻辑回归已用 ${metrics.positives} 次完播 / ${metrics.negatives} 次跳过训练，并叠加听歌序列（Item2Vec + 连听关系）。右键歌曲可以标记"不喜欢"。`
-            : "先听几首（完播或跳过都行）。本地模型会用这些隐式反馈学习你的口味。"}
-        </p>
+        <div className="rec-text">
+          <p>
+            {trained
+              ? "根据你听完、跳过和常连着听的歌挑选，听得越多越准。不想再听到的歌，可以右键选「不喜欢」。"
+              : "先随便听几首，听完或跳过都算。之后这里会按你的口味推荐。"}
+          </p>
+          <details className="rec-how">
+            <summary>推荐原理</summary>
+            <p>
+              {trained && metrics
+                ? `本地逻辑回归模型，已用 ${metrics.positives} 次完播 / ${metrics.negatives} 次跳过训练，再叠加听歌序列（Item2Vec + 连听关系）和多样性重排。`
+                : "听歌记录还不够训练模型，暂时按歌曲内容（歌手、专辑、风格）的相似度推荐。"}
+              全部在本机计算，听歌记录不会上传。
+            </p>
+          </details>
+        </div>
         {items.length > 0 ? (
-          <button className="ghost-btn" type="button" onClick={onPlaySmart}>
+          <button className="primary-btn" type="button" onClick={onPlaySmart}>
+            <IconPlay size={14} />
             按推荐播放
           </button>
         ) : null}
@@ -57,7 +70,12 @@ export const RecommendPanel = memo(function RecommendPanel({ items, metrics, cur
                 <small>{track.artist}</small>
                 <em>{item.reason}</em>
               </span>
-              <span className="rec-score">{Math.round(item.pLike * 100)}%</span>
+              {trained ? (
+                <span className="rec-score" title="估计你会喜欢这首歌的程度">
+                  <small>匹配</small>
+                  {Math.round(item.pLike * 100)}%
+                </span>
+              ) : null}
             </button>
           );
         })}

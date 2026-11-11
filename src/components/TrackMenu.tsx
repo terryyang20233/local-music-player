@@ -21,6 +21,8 @@ export type MenuActions = {
   createPlaylistWith: (name: string, track: Track) => void;
   removeFromPlaylist: (playlistId: string, track: Track) => void;
   removeFromQueue: (track: Track) => void;
+  goArtist: (track: Track) => void;
+  goAlbum: (track: Track) => void;
 };
 
 type Props = {
@@ -118,6 +120,15 @@ export function TrackMenu({ menu, playlists, liked, actions, onClose }: Props) {
       </button>
       <button role="menuitem" type="button" onClick={run(() => actions.dislike(track))}>
         不喜欢，少推荐这类
+      </button>
+      <hr />
+      <button role="menuitem" type="button" onClick={run(() => actions.goArtist(track))}>
+        查看歌手
+        <small>{track.artist}</small>
+      </button>
+      <button role="menuitem" type="button" onClick={run(() => actions.goAlbum(track))}>
+        查看专辑
+        <small>{track.album}</small>
       </button>
       <hr />
       <p className="menu-label">添加到歌单</p>

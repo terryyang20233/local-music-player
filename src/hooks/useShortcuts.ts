@@ -9,7 +9,7 @@ export type ShortcutHandlers = {
   toggleMute: () => void;
 };
 
-function isTypingTarget(target: EventTarget | null): boolean {
+export function isTypingTarget(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return true;
   return target.tagName === "INPUT" && (target as HTMLInputElement).type !== "range";

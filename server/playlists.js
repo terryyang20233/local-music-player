@@ -73,6 +73,32 @@ export class Playlists {
     return playlist;
   }
 
+  /**
+   * 撤销删除：按原 ID 放回 index 位置。同 ID 的歌单已经存在时直接返回它（重复撤销不会多出一份）。
+   * @param {{ id?: unknown, name?: unknown, trackIds?: unknown, createdAt?: unknown }} playlist
+   * @param {unknown} index
+   */
+  restore(playlist, index) {
+    if (!playlist || typeof playlist.id !== "string" || !/^[\w-]{1,64}$/.test(playlist.id)) return null;
+    const existing = this.get(playlist.id);
+    if (existing) return existing;
+    const name = cleanName(playlist.name);
+    if (!name) return null;
+    const now = Date.now();
+    const trackIds = Array.isArray(playlist.trackIds) ? playlist.trackIds.filter((t) => typeof t === "string") : [];
+    const restored = {
+      id: playlist.id,
+      name,
+      trackIds: [...new Set(trackIds)],
+      createdAt: Number.isFinite(playlist.createdAt) ? Number(playlist.createdAt) : now,
+      updatedAt: now,
+    };
+    const at = Number.isInteger(index) ? Math.max(0, Math.min(Number(index), this.items.length)) : this.items.length;
+    this.items.splice(at, 0, restored);
+    this.#save();
+    return restored;
+  }
+
   remove(id) {
     const before = this.items.length;
     this.items = this.items.filter((p) => p.id !== id);

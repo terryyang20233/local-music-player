@@ -1,4 +1,5 @@
 {
   "musicDir": "~/Desktop/music-resources",
-  "port": 8787
+  "port": 8787,
+  "onlineLyrics": true
 }

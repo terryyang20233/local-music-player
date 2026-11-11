@@ -17,6 +17,7 @@
     "preview": "npm run build && npm start",
     "app": "bash scripts/launch.sh",
     "install-app": "bash scripts/install-app.sh",
+    "restart": "bash scripts/restart.sh",
     "eval": "node server/eval.js",
     "test": "vitest run",
     "lint": "eslint .",
@@ -26,6 +27,7 @@
   "dependencies": {
     "express": "^4.22.3",
     "music-metadata": "11.16.1",
+    "opencc-js": "1.4.2",
     "pinyin-pro": "3.29.5",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"

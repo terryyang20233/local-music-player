@@ -32,6 +32,26 @@ describe("Playlists", () => {
     expect(new Playlists(dir).list()).toEqual([]);
   });
 
+  it("restore 按原 ID 放回原位置，重复撤销不会多出一份", () => {
+    const { dir, playlists } = store();
+    const a = playlists.create("a");
+    const b = playlists.create("b");
+    playlists.addTrack(b.id, "x");
+    const snapshot = { ...playlists.get(b.id), trackIds: [...b.trackIds] };
+    playlists.create("c");
+    playlists.remove(b.id);
+
+    const restored = playlists.restore(snapshot, 1);
+    expect(restored).toMatchObject({ id: b.id, name: "b", trackIds: ["x"], createdAt: snapshot.createdAt });
+    expect(playlists.restore(snapshot, 1)).toBe(restored);
+    expect(new Playlists(dir).list().map((p) => p.name)).toEqual(["a", "b", "c"]);
+    expect(playlists.get(a.id)).not.toBeNull();
+
+    expect(playlists.restore({ id: "../x", name: "bad" }, 0)).toBeNull();
+    expect(playlists.restore({ id: "ok", name: "   " }, 0)).toBeNull();
+    expect(playlists.restore(null, 0)).toBeNull();
+  });
+
   it("migrateIds 改写歌单里的歌曲 ID", () => {
     const { playlists } = store();
     const p = playlists.create("a");
